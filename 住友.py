@@ -8,7 +8,8 @@ import pandas as pd
 import numpy as np
 import random
 import re
-from geopy.distance import geodesic
+
+# from geopy.distance import geodesic
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 

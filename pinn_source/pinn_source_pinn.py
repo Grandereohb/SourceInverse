@@ -1,18 +1,16 @@
-﻿import os
+import os
 import math
+import re
 import pandas as pd
 import numpy as np
 import torch
 import torch.nn as nn
 
 # ---------- Config ----------
-SITE_PATH = os.path.join(os.path.dirname(__file__), "..", "data_sumitomo", "sites.xlsx")
-CONC_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "data_sumitomo", "厂界", "test3", "3.xlsx"
-)
-WIND_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "data_sumitomo", "厂界", "test3", "wind.xlsx"
-)
+BASE_DIR = os.path.join(os.path.dirname(__file__), "..")
+SITE_PATH = os.path.join(BASE_DIR, "data_sumitomo", "sites.xlsx")
+CONC_PATH = os.path.join(BASE_DIR, "data_sumitomo", "changjie", "test3", "3.xlsx")
+WIND_PATH = os.path.join(BASE_DIR, "data_sumitomo", "changjie", "test3", "wind.xlsx")
 
 # If your wind direction is "from" (meteorological), keep True.
 # If your dir is "to" (where wind is blowing toward), set False.
@@ -55,6 +53,13 @@ def latlon_to_xy(lon, lat, lon0, lat0):
     x = (lon - lon0) * math.cos(math.radians(lat0)) * 111320.0
     y = (lat - lat0) * 110540.0
     return x, y
+
+
+def xy_to_latlon(x, y, lon0, lat0):
+    """Inverse of local tangent plane projection."""
+    lon = lon0 + x / (math.cos(math.radians(lat0)) * 111320.0)
+    lat = lat0 + y / 110540.0
+    return lon, lat
 
 
 def load_sites(path):
@@ -323,14 +328,16 @@ def main():
     import matplotlib.pyplot as plt
 
     plt.figure(figsize=(6, 6))
-    plt.scatter(sites["x"], sites["y"], c="blue", s=80, label="Stations")
+    plt.scatter(sites["lon"], sites["lat"], c="blue", s=80, label="Stations")
     for _, r in sites.iterrows():
-        plt.text(r["x"], r["y"], str(r["station"]), fontsize=10, ha="left", va="bottom")
-    plt.scatter(xs, ys, c="red", s=150, marker="*", label="Estimated Source")
-    plt.axhline(0, color="#dddddd", linewidth=1)
-    plt.axvline(0, color="#dddddd", linewidth=1)
-    plt.xlabel("x (m)")
-    plt.ylabel("y (m)")
+        plt.text(
+            r["lon"], r["lat"], str(r["station"]), fontsize=10, ha="left", va="bottom"
+        )
+    plt.scatter(
+        pred_lon, pred_lat, c="red", s=150, marker="*", label="Estimated Source"
+    )
+    plt.xlabel("Longitude")
+    plt.ylabel("Latitude")
     plt.title("Stations and Estimated Source")
     plt.legend()
     plt.grid(True)
@@ -368,22 +375,30 @@ def main():
     if vmin == vmax:
         vmin, vmax = all_vals.min(), all_vals.max()
 
+    lon_min, lat_min = xy_to_latlon(x_min, y_min, lon0, lat0)
+    lon_max, lat_max = xy_to_latlon(x_max, y_max, lon0, lat0)
+
     fig, ax = plt.subplots(figsize=(6, 6))
     im = ax.imshow(
         frames[0],
         origin="lower",
-        extent=[x_min, x_max, y_min, y_max],
+        extent=[lon_min, lon_max, lat_min, lat_max],
         cmap="viridis",
         aspect="auto",
         vmin=vmin,
         vmax=vmax,
     )
     ax.scatter(
-        sites["x"], sites["y"], c="white", s=20, edgecolors="black", label="Stations"
+        sites["lon"],
+        sites["lat"],
+        c="white",
+        s=20,
+        edgecolors="black",
+        label="Stations",
     )
-    ax.scatter(xs, ys, c="red", s=80, marker="*", label="Estimated Source")
-    ax.set_xlabel("x (m)")
-    ax.set_ylabel("y (m)")
+    ax.scatter(pred_lon, pred_lat, c="red", s=80, marker="*", label="Estimated Source")
+    ax.set_xlabel("Longitude")
+    ax.set_ylabel("Latitude")
     ax.legend(loc="upper right")
     cbar = fig.colorbar(im, ax=ax)
     cbar.set_label("Concentration")
