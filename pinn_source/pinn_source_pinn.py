@@ -337,7 +337,68 @@ def main():
     plt.tight_layout()
     plt.show()
 
+    # --------- Diffusion Animation (better scaling) ---------
+    from matplotlib import animation
+
+    model.eval()
+    nx, ny = 120, 120
+    n_frames = 40
+    xs_lin = np.linspace(x_min, x_max, nx)
+    ys_lin = np.linspace(y_min, y_max, ny)
+    XX, YY = np.meshgrid(xs_lin, ys_lin)
+
+    # Use time range in hours
+    t_frames = np.linspace(t_min, t_max, n_frames)
+
+    # Precompute frames so we can choose a good global color scale
+    frames = []
+    for tf in t_frames:
+        tt = np.full_like(XX, tf)
+        xyt = np.stack([XX.ravel(), YY.ravel(), tt.ravel()], axis=1)
+        xyt_t = torch.tensor(xyt, dtype=torch.float32, device=device)
+        with torch.no_grad():
+            cc = model(xyt_t).cpu().numpy().reshape(ny, nx)
+        cc = np.clip(cc, 0, None)  # for visualization
+        frames.append(cc)
+
+    # robust color scale
+    all_vals = np.concatenate([f.ravel() for f in frames])
+    vmin = np.percentile(all_vals, 5)
+    vmax = np.percentile(all_vals, 95)
+    if vmin == vmax:
+        vmin, vmax = all_vals.min(), all_vals.max()
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    im = ax.imshow(
+        frames[0],
+        origin="lower",
+        extent=[x_min, x_max, y_min, y_max],
+        cmap="viridis",
+        aspect="auto",
+        vmin=vmin,
+        vmax=vmax,
+    )
+    ax.scatter(
+        sites["x"], sites["y"], c="white", s=20, edgecolors="black", label="Stations"
+    )
+    ax.scatter(xs, ys, c="red", s=80, marker="*", label="Estimated Source")
+    ax.set_xlabel("x (m)")
+    ax.set_ylabel("y (m)")
+    ax.legend(loc="upper right")
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.set_label("Concentration")
+
+    def frame_fn(i):
+        im.set_data(frames[i])
+        ax.set_title(f"Diffusion Over Time (t={t_frames[i]:.2f} h)")
+        return [im]
+
+    ani = animation.FuncAnimation(
+        fig, frame_fn, frames=n_frames, interval=200, blit=False
+    )
+    ani.save("diffusion.gif", writer="pillow", fps=5)
+    plt.show()
+
 
 if __name__ == "__main__":
     main()
-
