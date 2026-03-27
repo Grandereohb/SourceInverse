@@ -7,10 +7,11 @@ import torch
 import torch.nn as nn
 
 # ---------- Config ----------
-BASE_DIR = os.path.join(os.path.dirname(__file__), "..")
-SITE_PATH = os.path.join(BASE_DIR, "data_sumitomo", "sites.xlsx")
-CONC_PATH = os.path.join(BASE_DIR, "data_sumitomo", "changjie", "test3", "3.xlsx")
-WIND_PATH = os.path.join(BASE_DIR, "data_sumitomo", "changjie", "test3", "wind.xlsx")
+SITE_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\zhenhua\sites.xlsx"
+CONC_PATH = (
+    r"C:\Document\phd\SourceInverse\SourceInverse\data\zhenhua\concentration.xlsx"
+)
+WIND_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\zhenhua\wind.xlsx"
 
 # If your wind direction is "from" (meteorological), keep True.
 # If your dir is "to" (where wind is blowing toward), set False.
@@ -25,26 +26,48 @@ N_COLLOCATION = 5000
 
 
 def dms_to_decimal(dms_str: str) -> float:
-    """Convert DMS like 120°56'38.23" or 120掳56'38.23" to decimal degrees."""
+    """Convert DMS to decimal degrees."""
+    if dms_str is None:
+        raise ValueError("Invalid DMS format: None")
+
+    # If already numeric, return directly
+    if isinstance(dms_str, (int, float, np.floating)):
+        if np.isnan(dms_str):
+            raise ValueError("Invalid DMS format: NaN")
+        return float(dms_str)
+
     s = str(dms_str).strip()
-    # Normalize degree symbol variants
-    s = s.replace("掳", "°").replace("Ўг", "°")
-    # Split by ° ' "
-    parts = []
-    cur = ""
-    for ch in s:
-        if ch in ["°", "'", '"']:
-            if cur:
-                parts.append(cur)
-                cur = ""
-        else:
-            cur += ch
-    if cur:
-        parts.append(cur)
-    if len(parts) < 3:
-        raise ValueError(f"Invalid DMS format: {dms_str}")
-    deg, minute, sec = parts[0], parts[1], parts[2]
-    return float(deg) + float(minute) / 60.0 + float(sec) / 3600.0
+
+    # If it's already a plain decimal string, return directly
+    if re.fullmatch(r"[-+]?\d+(?:\.\d+)?", s):
+        return float(s)
+
+    # Normalize degree symbol variants / mojibake
+    s = s.replace("\\u00c2\\u00b0", "\\u00b0")  # mojibake for degree
+    s = s.replace("\\u040e\\u0433", "\\u00b0")  # mojibake for degree
+    for deg_sym in ["\u63b3", "\u00ba", "\u02da", "\u00b0"]:
+        s = s.replace(deg_sym, "\u00b0")
+    s = s.replace("\u2032", "'").replace("\u2033", '"')
+
+    # Normalize full-width digits and symbols
+    s = s.translate(
+        str.maketrans(
+            "\uff10\uff11\uff12\uff13\uff14\uff15\uff16\uff17\uff18\uff19\uff0e\uff0d\uff0b",
+            "0123456789.-+",
+        )
+    )
+
+    # Extract numbers robustly
+    nums = [float(x) for x in re.findall(r"[-+]?\d+(?:\.\d+)?", s)]
+    if len(nums) >= 3:
+        deg, minute, sec = nums[0], nums[1], nums[2]
+        return deg + minute / 60.0 + sec / 3600.0
+    if len(nums) == 2:
+        deg, minute = nums[0], nums[1]
+        return deg + minute / 60.0
+    if len(nums) == 1:
+        return nums[0]
+    raise ValueError(f"Invalid DMS format: {dms_str}")
 
 
 def latlon_to_xy(lon, lat, lon0, lat0):
@@ -177,6 +200,31 @@ def main():
 
     # Merge on time
     data = pd.merge(conc, wind, on="time", how="inner")
+
+    # Only keep stations that actually have concentration data
+    station_cols = [s for s in sites["station"].tolist() if s in data.columns]
+    if not station_cols:
+        raise ValueError("No station columns found in concentration data.")
+
+    # Drop station columns that are all zero/NaN
+    nonzero_station_cols = [
+        c for c in station_cols if not data[c].replace(0, np.nan).isna().all()
+    ]
+    if not nonzero_station_cols:
+        raise ValueError("All station columns are zero in the training data.")
+
+    # Keep only needed columns
+    data = data[["time", "dir", "sp"] + nonzero_station_cols]
+
+    # Drop rows where wind dir is zero
+    data = data.loc[data["dir"].fillna(0) != 0].copy()
+
+    # Drop rows where any station concentration is zero/NaN
+    mask_any_zero = data[nonzero_station_cols].replace(0, np.nan).isna().any(axis=1)
+    data = data.loc[~mask_any_zero].copy()
+
+    valid_stations = nonzero_station_cols
+    sites_plot = sites[sites["station"].isin(valid_stations)].copy()
     if data.empty:
         raise ValueError("No matching timestamps between concentration and wind data.")
 
@@ -328,8 +376,8 @@ def main():
     import matplotlib.pyplot as plt
 
     plt.figure(figsize=(6, 6))
-    plt.scatter(sites["lon"], sites["lat"], c="blue", s=80, label="Stations")
-    for _, r in sites.iterrows():
+    plt.scatter(sites_plot["lon"], sites_plot["lat"], c="blue", s=80, label="Stations")
+    for _, r in sites_plot.iterrows():
         plt.text(
             r["lon"], r["lat"], str(r["station"]), fontsize=10, ha="left", va="bottom"
         )
@@ -389,8 +437,8 @@ def main():
         vmax=vmax,
     )
     ax.scatter(
-        sites["lon"],
-        sites["lat"],
+        sites_plot["lon"],
+        sites_plot["lat"],
         c="white",
         s=20,
         edgecolors="black",
