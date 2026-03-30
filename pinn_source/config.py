@@ -1,16 +1,95 @@
-# Configuration
-SITE_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\zhenhua\sites.xlsx"
-CONC_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\zhenhua\concentration.xlsx"
-WIND_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\zhenhua\wind.xlsx"
+# =========================
+# Data Paths
+# =========================
+SITE_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh\sites.xlsx"
+CONC_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh\concentration.xlsx"
+WIND_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh\wind.xlsx"
 
-# If your wind direction is "from" (meteorological), keep True.
-# If your dir is "to" (where wind is blowing toward), set False.
-WIND_DIR_IS_FROM = True
-
-# Training hyperparams
-EPOCHS = 5000
-LR = 1e-3
-N_COLLOCATION = 5000
-# Model selection
+# =========================
+# Model Selection
+# =========================
+# MODEL_NAME: model key used by model registry.
 MODEL_NAME = "pinn"
 
+# =========================
+# Wind Direction Convention
+# =========================
+# WIND_DIR_IS_FROM:
+# True  -> meteorological "from" convention (0=N means wind comes from north)
+# False -> "to" convention (0=N means wind blows toward north)
+WIND_DIR_IS_FROM = True
+
+# =========================
+# Training Basics
+# =========================
+# EPOCHS: number of optimization iterations.
+EPOCHS = 5000
+
+# LR: learning rate for model optimizer (Adam).
+LR = 1e-3
+
+# N_COLLOCATION: number of PDE collocation points per cycle.
+N_COLLOCATION = 5000
+
+# =========================
+# Core Loss Weights (Base)
+# =========================
+# Base multipliers before optional adaptive weighting.
+LOSS_W_DATA = 1.0
+LOSS_W_PDE = 1.0
+LOSS_W_PENALTY = 1.0
+
+# =========================
+# Source / Physics
+# =========================
+# SIGMA_SRC: source Gaussian width in normalized coordinates.
+SIGMA_SRC = 0.08
+
+# D_MIN_PHYS: lower bound of physical diffusion coefficient before normalization.
+D_MIN_PHYS = 0.01
+
+# WIND_SCALE: multiplier for normalized wind velocity to tune advection strength.
+WIND_SCALE = 10.0
+
+# =========================
+# Residual Weighting / Collocation Sampling
+# =========================
+# RESIDUAL_R: source-near radius for PDE residual weighting (normalized coords).
+RESIDUAL_R = 0.05
+
+# RESIDUAL_W_SCALE: extra residual weight near source; 0 disables source-local boost.
+RESIDUAL_W_SCALE = 0.2
+
+# COLLOC_SOURCE_RATIO: fraction of collocation points sampled near estimated source.
+COLLOC_SOURCE_RATIO = 0.2
+
+# COLLOC_SOURCE_R: spread (normalized) for source-focused collocation sampling.
+COLLOC_SOURCE_R = 0.1
+
+# =========================
+# Adaptive Loss Weighting
+# =========================
+# USE_ADAPTIVE_LOSS: whether to learn data/pde/penalty balancing weights.
+USE_ADAPTIVE_LOSS = True
+
+# ADAPTIVE_LOSS_LR: optimizer learning rate for adaptive loss weights.
+ADAPTIVE_LOSS_LR = 1e-2
+
+# ADAPTIVE_INIT_LOG_VARS: initial log-variance values [data, pde, penalty].
+ADAPTIVE_INIT_LOG_VARS = [0.0, 0.0, 0.0]
+
+# ADAPTIVE_WARMUP_EPOCHS: fixed-weight warmup epochs before adaptive updates.
+ADAPTIVE_WARMUP_EPOCHS = 1000
+
+# ADAPTIVE_MIN_PRECISIONS: lower bound of adaptive precisions [data, pde, penalty].
+ADAPTIVE_MIN_PRECISIONS = [0.3, 1.0, 0.0]
+
+# ADAPTIVE_MAX_PRECISIONS: upper bound of adaptive precisions [data, pde, penalty].
+ADAPTIVE_MAX_PRECISIONS = [10.0, 10.0, 10.0]
+
+# =========================
+# Legacy (currently not used in pipeline)
+# =========================
+# Kept for compatibility; current pipeline computes dynamic L/T from data span.
+SCALE_XY = 1000.0
+SCALE_T = 1.0
