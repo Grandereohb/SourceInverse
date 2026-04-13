@@ -16,9 +16,19 @@ class PINN(nn.Module):
 
         # Learnable physical parameters
         self.logD = nn.Parameter(torch.tensor(0.0))  # D = exp(logD)
-        self.logQ = nn.Parameter(torch.tensor(0.0))  # Q = exp(logQ)
+        self.logQ = nn.Parameter(torch.tensor(0.0))  # baseline source strength
         self.xs = nn.Parameter(torch.tensor(0.0))
         self.ys = nn.Parameter(torch.tensor(0.0))
+
+        # Time-dependent source modulation: Q(t) = exp(logQ + q_net(t))
+        self.q_net = nn.Sequential(
+            nn.Linear(1, 16),
+            nn.Tanh(),
+            nn.Linear(16, 1),
+        )
+        # Start from near-constant source and let training learn temporal variation.
+        nn.init.zeros_(self.q_net[-1].weight)
+        nn.init.zeros_(self.q_net[-1].bias)
 
     def forward(self, xyt):
         return self.net(xyt)
@@ -26,5 +36,9 @@ class PINN(nn.Module):
     def D(self):
         return torch.exp(self.logD)
 
-    def Q(self):
-        return torch.exp(self.logQ)
+    def Q(self, t=None):
+        if t is None:
+            return torch.exp(self.logQ)
+        if t.dim() == 1:
+            t = t.view(-1, 1)
+        return torch.exp(self.logQ + self.q_net(t))

@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 
 # Step 1: Load site data (station coordinates)
-site_file_path = r"C:\Document\phd\SourceInverse\SourceInverse\data_sumitomo\sites.xlsx"
+site_file_path = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh\sites.xlsx"
 site_data = pd.read_excel(site_file_path)
 
 
@@ -62,13 +62,13 @@ site_coordinates_cleaned["Y"] = (
 
 # Step 3: Load pollution monitoring data for the three stations
 monitoring_data_file_path = (
-    r"C:\Document\phd\SourceInverse\SourceInverse\data_sumitomo\changjie\test1\1.xlsx"
+    r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh\concentration.xlsx"
 )
 monitoring_data = pd.read_excel(monitoring_data_file_path)
 monitoring_data.columns = ["时间", "N", "S", "E"]
 
 # Step 4: Load wind data
-wind_file_path = r"C:\Document\phd\SourceInverse\SourceInverse\data_sumitomo\changjie\test1\wind.xlsx"
+wind_file_path = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh\wind.xlsx"
 wind_data = pd.read_excel(wind_file_path)
 # Assuming wind_data has columns ['Hour', 'Wind_Direction', 'Wind_Speed']
 

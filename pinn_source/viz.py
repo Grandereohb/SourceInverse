@@ -44,6 +44,12 @@ def diffusion_animation(
     sites_plot,
     pred_lon,
     pred_lat,
+    x0,
+    y0,
+    t0,
+    L,
+    T,
+    c_scale=1.0,
     n_frames=40,
     nx=120,
     ny=120,
@@ -62,9 +68,13 @@ def diffusion_animation(
     for tf in t_frames:
         tt = np.full_like(XX, tf)
         xyt = np.stack([XX.ravel(), YY.ravel(), tt.ravel()], axis=1)
+        xyt[:, 0] = (xyt[:, 0] - x0) / L
+        xyt[:, 1] = (xyt[:, 1] - y0) / L
+        xyt[:, 2] = (xyt[:, 2] - t0) / T
         xyt_t = torch.tensor(xyt, dtype=torch.float32, device=device)
         with torch.no_grad():
             cc = model(xyt_t).cpu().numpy().reshape(ny, nx)
+        cc = cc * c_scale
         cc = np.clip(cc, 0, None)  # for visualization
         frames.append(cc)
 
@@ -77,6 +87,18 @@ def diffusion_animation(
 
     lon_min, lat_min = xy_to_latlon(x_min, y_min, lon0, lat0)
     lon_max, lat_max = xy_to_latlon(x_max, y_max, lon0, lat0)
+
+    # Ensure source is inside the view with a small padding
+    lon_min = min(lon_min, pred_lon)
+    lon_max = max(lon_max, pred_lon)
+    lat_min = min(lat_min, pred_lat)
+    lat_max = max(lat_max, pred_lat)
+    pad_lon = (lon_max - lon_min) * 0.05
+    pad_lat = (lat_max - lat_min) * 0.05
+    lon_min -= pad_lon
+    lon_max += pad_lon
+    lat_min -= pad_lat
+    lat_max += pad_lat
 
     fig, ax = plt.subplots(figsize=(6, 6))
     im = ax.imshow(
@@ -96,6 +118,16 @@ def diffusion_animation(
         edgecolors="black",
         label="Stations",
     )
+    for _, r in sites_plot.iterrows():
+        ax.text(
+            r["lon"],
+            r["lat"],
+            str(r["station"]),
+            fontsize=9,
+            color="white",
+            ha="left",
+            va="bottom",
+        )
     ax.scatter(pred_lon, pred_lat, c="red", s=80, marker="*", label="Estimated Source")
     ax.set_xlabel("Longitude")
     ax.set_ylabel("Latitude")

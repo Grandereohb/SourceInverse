@@ -31,22 +31,28 @@ LR = 1e-3
 # N_COLLOCATION: number of PDE collocation points per cycle.
 N_COLLOCATION = 5000
 
+# DOMAIN_PAD_M: extra padding (meters) added around station bounding box.
+DOMAIN_PAD_M = 500.0
+
 # =========================
 # Core Loss Weights (Base)
 # =========================
 # Base multipliers before optional adaptive weighting.
 LOSS_W_DATA = 1.0
-LOSS_W_PDE = 1.0
+LOSS_W_PDE = 0.1
 LOSS_W_PENALTY = 1.0
 
 # =========================
 # Source / Physics
 # =========================
 # SIGMA_SRC: source Gaussian width in normalized coordinates.
-SIGMA_SRC = 0.08
+SIGMA_SRC = 0.02
 
 # D_MIN_PHYS: lower bound of physical diffusion coefficient before normalization.
 D_MIN_PHYS = 0.01
+
+# D_PERP_RATIO: fixed ratio D_perp / D_parallel for anisotropic diffusion.
+D_PERP_RATIO = 0.2
 
 # WIND_SCALE: multiplier for normalized wind velocity to tune advection strength.
 WIND_SCALE = 10.0
@@ -66,11 +72,30 @@ COLLOC_SOURCE_RATIO = 0.2
 # COLLOC_SOURCE_R: spread (normalized) for source-focused collocation sampling.
 COLLOC_SOURCE_R = 0.1
 
+
+# =========================
+# Source-ID Extra Loss Weights
+# =========================
+# LOSS_W_RADIAL: weight for outward radial monotonicity constraint.
+LOSS_W_RADIAL = 5.0
+
+# LOSS_W_WIND: weight for upwind concentration suppression.
+LOSS_W_WIND = 2.0
+
+# LOSS_W_BOUNDARY: weight for source boundary repulsion penalty.
+LOSS_W_BOUNDARY = 0.0
+
+# LOSS_W_AXIS: weight for plume-axis wind-alignment constraint.
+LOSS_W_AXIS = 5.0
+
+# AXIS_UPDATE_INTERVAL: compute axis loss once every N epochs and reuse cached value in between.
+AXIS_UPDATE_INTERVAL = 5
+
 # =========================
 # Adaptive Loss Weighting
 # =========================
 # USE_ADAPTIVE_LOSS: whether to learn data/pde/penalty balancing weights.
-USE_ADAPTIVE_LOSS = True
+USE_ADAPTIVE_LOSS = False
 
 # ADAPTIVE_LOSS_LR: optimizer learning rate for adaptive loss weights.
 ADAPTIVE_LOSS_LR = 1e-2
@@ -86,6 +111,28 @@ ADAPTIVE_MIN_PRECISIONS = [0.3, 1.0, 0.0]
 
 # ADAPTIVE_MAX_PRECISIONS: upper bound of adaptive precisions [data, pde, penalty].
 ADAPTIVE_MAX_PRECISIONS = [10.0, 10.0, 10.0]
+
+
+# =========================
+# Data Fitting Stabilization
+# =========================
+# DATA_NORMALIZE: enable robust scaling for concentration target to improve optimization stability.
+DATA_NORMALIZE = True
+
+# DATA_SCALE_PERCENTILE: robust scale based on percentile(|c_obs|), used when DATA_NORMALIZE=True.
+DATA_SCALE_PERCENTILE = 85.0
+
+# DATA_WARMUP_EPOCHS: train with data-dominant objective in early epochs.
+DATA_WARMUP_EPOCHS = 1500
+
+# DATA_WARMUP_PDE_FACTOR: multiplier for PDE term during warmup (0 means data-only warmup).
+DATA_WARMUP_PDE_FACTOR = 0.0
+
+# PDE_RAMP_EPOCHS: epochs to smoothly increase PDE contribution from warmup factor to full weight.
+PDE_RAMP_EPOCHS = 3000
+
+# MAX_GRAD_NORM: gradient clipping threshold for training stability (None or <=0 disables).
+MAX_GRAD_NORM = 10.0
 
 # =========================
 # Legacy (currently not used in pipeline)
