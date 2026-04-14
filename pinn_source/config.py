@@ -39,14 +39,14 @@ DOMAIN_PAD_M = 500.0
 # =========================
 # Base multipliers before optional adaptive weighting.
 LOSS_W_DATA = 1.0
-LOSS_W_PDE = 0.1
+LOSS_W_PDE = 1.0
 LOSS_W_PENALTY = 1.0
 
 # =========================
 # Source / Physics
 # =========================
 # SIGMA_SRC: source Gaussian width in normalized coordinates.
-SIGMA_SRC = 0.02
+SIGMA_SRC = 0.05
 
 # D_MIN_PHYS: lower bound of physical diffusion coefficient before normalization.
 D_MIN_PHYS = 0.01
@@ -77,16 +77,22 @@ COLLOC_SOURCE_R = 0.1
 # Source-ID Extra Loss Weights
 # =========================
 # LOSS_W_RADIAL: weight for outward radial monotonicity constraint.
-LOSS_W_RADIAL = 5.0
+LOSS_W_RADIAL = 0.0
 
 # LOSS_W_WIND: weight for upwind concentration suppression.
-LOSS_W_WIND = 2.0
+LOSS_W_WIND = 0.0
 
 # LOSS_W_BOUNDARY: weight for source boundary repulsion penalty.
 LOSS_W_BOUNDARY = 0.0
 
 # LOSS_W_AXIS: weight for plume-axis wind-alignment constraint.
 LOSS_W_AXIS = 5.0
+
+# LOSS_W_CROSSWIND: weight for suppressing excessive crosswind spreading.
+LOSS_W_CROSSWIND = 1.0
+
+# LOSS_W_PLUME: weight for enforcing monotonic decay along downwind plume direction.
+LOSS_W_PLUME = 0.0
 
 # AXIS_UPDATE_INTERVAL: compute axis loss once every N epochs and reuse cached value in between.
 AXIS_UPDATE_INTERVAL = 5

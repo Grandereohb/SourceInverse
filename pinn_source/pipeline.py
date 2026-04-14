@@ -16,6 +16,8 @@ from config import (
     LOSS_W_WIND,
     LOSS_W_BOUNDARY,
     LOSS_W_AXIS,
+    LOSS_W_CROSSWIND,
+    LOSS_W_PLUME,
     AXIS_UPDATE_INTERVAL,
     D_MIN_PHYS,
     D_PERP_RATIO,
@@ -337,8 +339,20 @@ def run(site_path, conc_path, wind_path):
         dc_dr = (dx * c_x + dy * c_y) / r
         loss_radial = torch.mean(torch.relu(dc_dr))
 
+        # 2) Crosswind plume-shape constraint: suppress spreading perpendicular to wind.
+        nx = -ey
+        ny = ex
+        grad_n = c_x * nx + c_y * ny
+        loss_crosswind = torch.mean(grad_n**2)
+
         # 3) Wind alignment: penalize concentration in upwind side of the source.
         projection = u_c * dx + v_c * dy
+        grad_s = c_x * ex + c_y * ey
+        downwind_mask = (projection >= 0.0).squeeze(1)
+        if torch.any(downwind_mask):
+            loss_plume = torch.mean(torch.relu(grad_s[downwind_mask]))
+        else:
+            loss_plume = torch.tensor(0.0, device=device)
         upwind_mask = (projection < 0.0).squeeze(1)
         if torch.any(upwind_mask):
             loss_wind = torch.mean(torch.relu(c_col[upwind_mask]))
@@ -412,6 +426,8 @@ def run(site_path, conc_path, wind_path):
         # penalty removed by request
         penalty_term = torch.tensor(0.0, device=device)
         radial_term = LOSS_W_RADIAL * loss_radial
+        crosswind_term = LOSS_W_CROSSWIND * loss_crosswind
+        plume_term = LOSS_W_PLUME * loss_plume
         wind_term = LOSS_W_WIND * loss_wind
         axis_term = LOSS_W_AXIS * loss_axis
 
@@ -439,6 +455,8 @@ def run(site_path, conc_path, wind_path):
             + pde_term_eff
             + penalty_term
             + radial_term
+            + crosswind_term
+            + plume_term
             + wind_term
             + boundary_term
             + axis_term
@@ -455,7 +473,13 @@ def run(site_path, conc_path, wind_path):
                 [data_term, pde_term_eff, penalty_term]
             )
             train_loss = (
-                train_loss + radial_term + wind_term + boundary_term + axis_term
+                train_loss
+                + radial_term
+                + crosswind_term
+                + plume_term
+                + wind_term
+                + boundary_term
+                + axis_term
             )
         else:
             train_loss = raw_loss
@@ -492,7 +516,8 @@ def run(site_path, conc_path, wind_path):
             print(
                 f"Epoch {epoch}: raw_loss={raw_loss.item():4f}, "
                 f"data={loss_data.item():.4f}, pde={loss_pde.item():.4f}, "
-                f"radial={loss_radial.item():.4f}, "
+                f"radial={loss_radial.item():.4f}, crosswind={loss_crosswind.item():.4f}, "
+                f"plume={loss_plume.item():.4f}, "
                 f"wind={loss_wind.item():.4f}, boundary={loss_boundary.item():.4f}, axis={loss_axis.item():.4f}, "
                 f"D={D.item():.3e}, Q_mean={Q_mean.item():.4f}, "
                 f"xs={xs.item():.3f}, ys={ys.item():.3f}, pde_factor={pde_factor:.3f}"
