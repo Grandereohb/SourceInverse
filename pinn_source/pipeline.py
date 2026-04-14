@@ -18,6 +18,8 @@ from config import (
     LOSS_W_AXIS,
     LOSS_W_CROSSWIND,
     LOSS_W_PLUME,
+    LOSS_W_SOURCE_LOCAL,
+    LOSS_W_TIME_SMOOTH,
     AXIS_UPDATE_INTERVAL,
     D_MIN_PHYS,
     D_PERP_RATIO,
@@ -77,6 +79,7 @@ def run(site_path, conc_path, wind_path):
 
     valid_stations = nonzero_station_cols
     sites_plot = sites[sites["station"].isin(valid_stations)].copy()
+    n_stations = len(sites_plot)
     if data.empty:
         raise ValueError("No matching timestamps between concentration and wind data.")
 
@@ -359,6 +362,16 @@ def run(site_path, conc_path, wind_path):
         else:
             loss_wind = torch.tensor(0.0, device=device)
 
+        # 3b) Source-local dominance: source neighborhood should stay higher than far field.
+        local_mask = (r <= max(SIGMA_SRC * 2.0, 0.05)).squeeze(1)
+        far_mask = (r >= max(SIGMA_SRC * 4.0, 0.12)).squeeze(1)
+        if torch.any(local_mask) and torch.any(far_mask):
+            c_local = torch.mean(c_col[local_mask])
+            c_far = torch.mean(c_col[far_mask])
+            loss_source_local = torch.relu(c_far - c_local)
+        else:
+            loss_source_local = torch.tensor(0.0, device=device)
+
         # 4) Plume-axis geometric constraint (time-sliced, observation points):
         # compute every N epochs and reuse cached scalar in between for speed.
         if (epoch - 1) % axis_update_every == 0:
@@ -421,6 +434,14 @@ def run(site_path, conc_path, wind_path):
         else:
             loss_axis = axis_loss_cache
 
+        # 5) Temporal smoothness on observation trajectories:
+        # avoid unrealistic jumps at the same station between adjacent timestamps.
+        if c_pred.numel() >= 2 * n_stations and c_pred.numel() % n_stations == 0:
+            c_pred_grid = c_pred.view(-1, n_stations)
+            loss_time_smooth = torch.mean((c_pred_grid[1:] - c_pred_grid[:-1]) ** 2)
+        else:
+            loss_time_smooth = torch.tensor(0.0, device=device)
+
         data_term = LOSS_W_DATA * loss_data
         pde_term = LOSS_W_PDE * loss_pde
         # penalty removed by request
@@ -428,6 +449,8 @@ def run(site_path, conc_path, wind_path):
         radial_term = LOSS_W_RADIAL * loss_radial
         crosswind_term = LOSS_W_CROSSWIND * loss_crosswind
         plume_term = LOSS_W_PLUME * loss_plume
+        source_local_term = LOSS_W_SOURCE_LOCAL * loss_source_local
+        time_smooth_term = LOSS_W_TIME_SMOOTH * loss_time_smooth
         wind_term = LOSS_W_WIND * loss_wind
         axis_term = LOSS_W_AXIS * loss_axis
 
@@ -457,6 +480,8 @@ def run(site_path, conc_path, wind_path):
             + radial_term
             + crosswind_term
             + plume_term
+            + source_local_term
+            + time_smooth_term
             + wind_term
             + boundary_term
             + axis_term
@@ -477,6 +502,8 @@ def run(site_path, conc_path, wind_path):
                 + radial_term
                 + crosswind_term
                 + plume_term
+                + source_local_term
+                + time_smooth_term
                 + wind_term
                 + boundary_term
                 + axis_term
@@ -513,12 +540,29 @@ def run(site_path, conc_path, wind_path):
                 )
             elif adaptive_loss is not None:
                 extra = ", adaptive=warmup"
+            loss_parts = [
+                f"data={loss_data.item():.4f}",
+                f"pde={loss_pde.item():.4f}",
+            ]
+            if LOSS_W_RADIAL > 0:
+                loss_parts.append(f"radial={loss_radial.item():.4f}")
+            if LOSS_W_CROSSWIND > 0:
+                loss_parts.append(f"crosswind={loss_crosswind.item():.4f}")
+            if LOSS_W_PLUME > 0:
+                loss_parts.append(f"plume={loss_plume.item():.4f}")
+            if LOSS_W_SOURCE_LOCAL > 0:
+                loss_parts.append(f"source_local={loss_source_local.item():.4f}")
+            if LOSS_W_TIME_SMOOTH > 0:
+                loss_parts.append(f"time_smooth={loss_time_smooth.item():.4f}")
+            if LOSS_W_WIND > 0:
+                loss_parts.append(f"wind={loss_wind.item():.4f}")
+            if LOSS_W_BOUNDARY > 0:
+                loss_parts.append(f"boundary={loss_boundary.item():.4f}")
+            if LOSS_W_AXIS > 0:
+                loss_parts.append(f"axis={loss_axis.item():.4f}")
             print(
                 f"Epoch {epoch}: raw_loss={raw_loss.item():4f}, "
-                f"data={loss_data.item():.4f}, pde={loss_pde.item():.4f}, "
-                f"radial={loss_radial.item():.4f}, crosswind={loss_crosswind.item():.4f}, "
-                f"plume={loss_plume.item():.4f}, "
-                f"wind={loss_wind.item():.4f}, boundary={loss_boundary.item():.4f}, axis={loss_axis.item():.4f}, "
+                f"{', '.join(loss_parts)}, "
                 f"D={D.item():.3e}, Q_mean={Q_mean.item():.4f}, "
                 f"xs={xs.item():.3f}, ys={ys.item():.3f}, pde_factor={pde_factor:.3f}"
                 f"{extra}"

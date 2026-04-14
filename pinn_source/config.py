@@ -94,6 +94,12 @@ LOSS_W_CROSSWIND = 1.0
 # LOSS_W_PLUME: weight for enforcing monotonic decay along downwind plume direction.
 LOSS_W_PLUME = 0.0
 
+# LOSS_W_SOURCE_LOCAL: weight for keeping source-neighborhood concentration above far field.
+LOSS_W_SOURCE_LOCAL = 1.0
+
+# LOSS_W_TIME_SMOOTH: weight for suppressing unrealistic temporal jumps at fixed locations.
+LOSS_W_TIME_SMOOTH = 0.5
+
 # AXIS_UPDATE_INTERVAL: compute axis loss once every N epochs and reuse cached value in between.
 AXIS_UPDATE_INTERVAL = 5
 
