@@ -49,7 +49,7 @@ LOSS_W_PENALTY = 1.0
 SIGMA_SRC = 0.05
 
 # D_MIN_PHYS: lower bound of physical diffusion coefficient before normalization.
-D_MIN_PHYS = 0.01
+D_MIN_PHYS = 500.0
 
 # D_PERP_RATIO: fixed ratio D_perp / D_parallel for anisotropic diffusion.
 D_PERP_RATIO = 0.2
@@ -67,10 +67,16 @@ RESIDUAL_R = 0.05
 RESIDUAL_W_SCALE = 0.2
 
 # COLLOC_SOURCE_RATIO: fraction of collocation points sampled near estimated source.
-COLLOC_SOURCE_RATIO = 0.2
+COLLOC_SOURCE_RATIO = 0.3
+
+# COLLOC_PLUME_RATIO: fraction of collocation points sampled along the downwind plume axis.
+COLLOC_PLUME_RATIO = 0.4
 
 # COLLOC_SOURCE_R: spread (normalized) for source-focused collocation sampling.
 COLLOC_SOURCE_R = 0.1
+
+# COLLOC_PLUME_LENGTH: downwind sampling extent in normalized coordinates.
+COLLOC_PLUME_LENGTH = 1.0
 
 
 # =========================
@@ -86,19 +92,31 @@ LOSS_W_WIND = 0.0
 LOSS_W_BOUNDARY = 0.0
 
 # LOSS_W_AXIS: weight for plume-axis wind-alignment constraint.
-LOSS_W_AXIS = 5.0
+LOSS_W_AXIS = 1.0
 
 # LOSS_W_CROSSWIND: weight for suppressing excessive crosswind spreading.
 LOSS_W_CROSSWIND = 1.0
+
+# LOSS_W_STATION_SMOOTH: weight for suppressing artificial sharp peaks around station points.
+LOSS_W_STATION_SMOOTH = 1.0
 
 # LOSS_W_PLUME: weight for enforcing monotonic decay along downwind plume direction.
 LOSS_W_PLUME = 0.0
 
 # LOSS_W_SOURCE_LOCAL: weight for keeping source-neighborhood concentration above far field.
-LOSS_W_SOURCE_LOCAL = 1.0
+LOSS_W_SOURCE_LOCAL = 0.0
+
+# SOURCE_LOCAL_MARGIN: required concentration margin between source neighborhood and far field.
+SOURCE_LOCAL_MARGIN = 0.2
+
+# SOURCE_LOCAL_RING_R: normalized radius of the annulus used to compare source-center vs nearby field.
+SOURCE_LOCAL_RING_R = 0.12
 
 # LOSS_W_TIME_SMOOTH: weight for suppressing unrealistic temporal jumps at fixed locations.
-LOSS_W_TIME_SMOOTH = 0.5
+LOSS_W_TIME_SMOOTH = 0.1
+
+# LOSS_W_Q_SMOOTH: weight for suppressing unrealistic jumps in time-varying source strength Q(t).
+LOSS_W_Q_SMOOTH = 0.2
 
 # AXIS_UPDATE_INTERVAL: compute axis loss once every N epochs and reuse cached value in between.
 AXIS_UPDATE_INTERVAL = 5
@@ -135,13 +153,13 @@ DATA_NORMALIZE = True
 DATA_SCALE_PERCENTILE = 85.0
 
 # DATA_WARMUP_EPOCHS: train with data-dominant objective in early epochs.
-DATA_WARMUP_EPOCHS = 1500
+DATA_WARMUP_EPOCHS = 300
 
 # DATA_WARMUP_PDE_FACTOR: multiplier for PDE term during warmup (0 means data-only warmup).
-DATA_WARMUP_PDE_FACTOR = 0.0
+DATA_WARMUP_PDE_FACTOR = 0.2
 
 # PDE_RAMP_EPOCHS: epochs to smoothly increase PDE contribution from warmup factor to full weight.
-PDE_RAMP_EPOCHS = 3000
+PDE_RAMP_EPOCHS = 1000
 
 # MAX_GRAD_NORM: gradient clipping threshold for training stability (None or <=0 disables).
 MAX_GRAD_NORM = 10.0

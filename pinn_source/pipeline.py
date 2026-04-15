@@ -17,16 +17,22 @@ from config import (
     LOSS_W_BOUNDARY,
     LOSS_W_AXIS,
     LOSS_W_CROSSWIND,
+    LOSS_W_STATION_SMOOTH,
     LOSS_W_PLUME,
     LOSS_W_SOURCE_LOCAL,
+    SOURCE_LOCAL_MARGIN,
+    SOURCE_LOCAL_RING_R,
     LOSS_W_TIME_SMOOTH,
+    LOSS_W_Q_SMOOTH,
     AXIS_UPDATE_INTERVAL,
     D_MIN_PHYS,
     D_PERP_RATIO,
     RESIDUAL_R,
     RESIDUAL_W_SCALE,
     COLLOC_SOURCE_RATIO,
+    COLLOC_PLUME_RATIO,
     COLLOC_SOURCE_R,
+    COLLOC_PLUME_LENGTH,
     WIND_SCALE,
     USE_ADAPTIVE_LOSS,
     ADAPTIVE_LOSS_LR,
@@ -203,24 +209,43 @@ def run(site_path, conc_path, wind_path):
 
     def sample_collocation(xs_center, ys_center):
         n_src = int(N_COLLOCATION * COLLOC_SOURCE_RATIO)
-        n_uni = N_COLLOCATION - n_src
+        n_plume = int(N_COLLOCATION * COLLOC_PLUME_RATIO)
+        n_uni = max(0, N_COLLOCATION - n_src - n_plume)
 
-        # Uniform background
+        # 1) Global uniform coverage.
         x_col_u = rng.uniform(x_min, x_max, n_uni)
         y_col_u = rng.uniform(y_min, y_max, n_uni)
         t_col_u = rng.uniform(t_min, t_max, n_uni)
 
-        # Source-focused sampling around current estimate (xs, ys)
-        x_col_s = rng.normal(loc=xs_center, scale=COLLOC_SOURCE_R, size=n_src)
-        y_col_s = rng.normal(loc=ys_center, scale=COLLOC_SOURCE_R, size=n_src)
+        # 2) Near-source polar sampling.
+        t_col_s = rng.uniform(t_min, t_max, n_src)
+        r_src = COLLOC_SOURCE_R * np.sqrt(rng.uniform(0.0, 1.0, n_src))
+        theta_src = rng.uniform(0.0, 2.0 * math.pi, n_src)
+        x_col_s = xs_center + r_src * np.cos(theta_src)
+        y_col_s = ys_center + r_src * np.sin(theta_src)
         x_col_s = np.clip(x_col_s, x_min, x_max)
         y_col_s = np.clip(y_col_s, y_min, y_max)
-        t_col_s = rng.uniform(t_min, t_max, n_src)
+
+        # 3) Downwind plume-axis sampling guided by time-varying wind.
+        t_col_p = rng.uniform(t_min, t_max, n_plume)
+        u_col_p = np.interp(t_col_p, t_w, u_w)
+        v_col_p = np.interp(t_col_p, t_w, v_w)
+        speed_p = np.sqrt(u_col_p**2 + v_col_p**2 + 1e-12)
+        ex_p = u_col_p / speed_p
+        ey_p = v_col_p / speed_p
+        dist_p = rng.uniform(0.0, COLLOC_PLUME_LENGTH, n_plume)
+        cross_p = rng.normal(loc=0.0, scale=0.15 * COLLOC_SOURCE_R, size=n_plume)
+        nx_p = -ey_p
+        ny_p = ex_p
+        x_col_p = xs_center + dist_p * ex_p + cross_p * nx_p
+        y_col_p = ys_center + dist_p * ey_p + cross_p * ny_p
+        x_col_p = np.clip(x_col_p, x_min, x_max)
+        y_col_p = np.clip(y_col_p, y_min, y_max)
 
         # Combine
-        x_col = np.concatenate([x_col_u, x_col_s])
-        y_col = np.concatenate([y_col_u, y_col_s])
-        t_col = np.concatenate([t_col_u, t_col_s])
+        x_col = np.concatenate([x_col_u, x_col_s, x_col_p])
+        y_col = np.concatenate([y_col_u, y_col_s, y_col_p])
+        t_col = np.concatenate([t_col_u, t_col_s, t_col_p])
 
         # Build tensors
         x_col_t = torch.tensor(x_col, dtype=torch.float32, device=device).view(-1, 1)
@@ -260,6 +285,18 @@ def run(site_path, conc_path, wind_path):
         xyt_obs = torch.cat([x_obs_t, y_obs_t, t_obs_t], dim=1).requires_grad_(True)
         c_pred = model(xyt_obs)
         loss_data = torch.mean((c_pred - c_obs_t) ** 2)
+        grads_obs = torch.autograd.grad(
+            c_pred, xyt_obs, torch.ones_like(c_pred), create_graph=True
+        )[0]
+        c_x_obs = grads_obs[:, 0:1]
+        c_y_obs = grads_obs[:, 1:2]
+        c_xx_obs = torch.autograd.grad(
+            c_x_obs, xyt_obs, torch.ones_like(c_x_obs), create_graph=True
+        )[0][:, 0:1]
+        c_yy_obs = torch.autograd.grad(
+            c_y_obs, xyt_obs, torch.ones_like(c_y_obs), create_graph=True
+        )[0][:, 1:2]
+        loss_station_smooth = torch.mean((c_xx_obs + c_yy_obs) ** 2)
 
         # PDE residual
         xyt_col = torch.cat([x_col_t, y_col_t, t_col_t], dim=1).requires_grad_(True)
@@ -284,9 +321,9 @@ def run(site_path, conc_path, wind_path):
 
         # normalized diffusion coefficient
         # D_MIN_PHYS is in physical units, so convert its lower bound to normalized space.
-        # D_norm_min = D_MIN_PHYS * T / (L**2)
-        D = model.D() * T / (L**2)
-        # D = torch.clamp(D, min=D_norm_min)
+        D_norm_min = D_MIN_PHYS * T / (L**2)
+        # Keep D learnable above a physical floor instead of hard-clamping it flat.
+        D = D_norm_min + model.D() * T / (L**2)
 
         # normalized source strength
         Q_col = model.Q(t_col_t) * T
@@ -362,15 +399,28 @@ def run(site_path, conc_path, wind_path):
         else:
             loss_wind = torch.tensor(0.0, device=device)
 
-        # 3b) Source-local dominance: source neighborhood should stay higher than far field.
-        local_mask = (r <= max(SIGMA_SRC * 2.0, 0.05)).squeeze(1)
-        far_mask = (r >= max(SIGMA_SRC * 4.0, 0.12)).squeeze(1)
-        if torch.any(local_mask) and torch.any(far_mask):
-            c_local = torch.mean(c_col[local_mask])
-            c_far = torch.mean(c_col[far_mask])
-            loss_source_local = torch.relu(c_far - c_local)
-        else:
-            loss_source_local = torch.tensor(0.0, device=device)
+        # 3b) Source-local dominance: concentration at source center should exceed a nearby annulus.
+        t_probe = t_w_t.view(-1, 1)
+        center_x = xs.expand_as(t_probe)
+        center_y = ys.expand_as(t_probe)
+        center_pts = torch.cat([center_x, center_y, t_probe], dim=1)
+        c_center = model(center_pts)
+
+        theta = torch.linspace(
+            0.0, 2.0 * math.pi, steps=12, device=device, dtype=torch.float32
+        )[:-1]
+        ring_r = max(SOURCE_LOCAL_RING_R, SIGMA_SRC * 2.0)
+        ring_x = xs + ring_r * torch.cos(theta)
+        ring_y = ys + ring_r * torch.sin(theta)
+        ring_pts = []
+        for t_i in t_w_t:
+            t_row = torch.full_like(theta, t_i)
+            ring_pts.append(torch.stack([ring_x, ring_y, t_row], dim=1))
+        ring_pts = torch.cat(ring_pts, dim=0)
+        c_ring = model(ring_pts)
+        loss_source_local = torch.relu(
+            torch.mean(c_ring) + SOURCE_LOCAL_MARGIN - torch.mean(c_center)
+        )
 
         # 4) Plume-axis geometric constraint (time-sliced, observation points):
         # compute every N epochs and reuse cached scalar in between for speed.
@@ -434,13 +484,12 @@ def run(site_path, conc_path, wind_path):
         else:
             loss_axis = axis_loss_cache
 
-        # 5) Temporal smoothness on observation trajectories:
-        # avoid unrealistic jumps at the same station between adjacent timestamps.
-        if c_pred.numel() >= 2 * n_stations and c_pred.numel() % n_stations == 0:
-            c_pred_grid = c_pred.view(-1, n_stations)
-            loss_time_smooth = torch.mean((c_pred_grid[1:] - c_pred_grid[:-1]) ** 2)
+        # 5) Smooth Q(t) rather than forcing the concentration field itself to be overly rigid.
+        if t_w_t.numel() >= 2:
+            q_series = model.Q(t_w_t.view(-1, 1)) * T
+            loss_q_smooth = torch.mean((q_series[1:] - q_series[:-1]) ** 2)
         else:
-            loss_time_smooth = torch.tensor(0.0, device=device)
+            loss_q_smooth = torch.tensor(0.0, device=device)
 
         data_term = LOSS_W_DATA * loss_data
         pde_term = LOSS_W_PDE * loss_pde
@@ -448,9 +497,11 @@ def run(site_path, conc_path, wind_path):
         penalty_term = torch.tensor(0.0, device=device)
         radial_term = LOSS_W_RADIAL * loss_radial
         crosswind_term = LOSS_W_CROSSWIND * loss_crosswind
+        station_smooth_term = LOSS_W_STATION_SMOOTH * loss_station_smooth
         plume_term = LOSS_W_PLUME * loss_plume
         source_local_term = LOSS_W_SOURCE_LOCAL * loss_source_local
-        time_smooth_term = LOSS_W_TIME_SMOOTH * loss_time_smooth
+        time_smooth_term = LOSS_W_TIME_SMOOTH * torch.tensor(0.0, device=device)
+        q_smooth_term = LOSS_W_Q_SMOOTH * loss_q_smooth
         wind_term = LOSS_W_WIND * loss_wind
         axis_term = LOSS_W_AXIS * loss_axis
 
@@ -479,9 +530,11 @@ def run(site_path, conc_path, wind_path):
             + penalty_term
             + radial_term
             + crosswind_term
+            + station_smooth_term
             + plume_term
             + source_local_term
             + time_smooth_term
+            + q_smooth_term
             + wind_term
             + boundary_term
             + axis_term
@@ -501,9 +554,11 @@ def run(site_path, conc_path, wind_path):
                 train_loss
                 + radial_term
                 + crosswind_term
+                + station_smooth_term
                 + plume_term
                 + source_local_term
                 + time_smooth_term
+                + q_smooth_term
                 + wind_term
                 + boundary_term
                 + axis_term
@@ -548,12 +603,14 @@ def run(site_path, conc_path, wind_path):
                 loss_parts.append(f"radial={loss_radial.item():.4f}")
             if LOSS_W_CROSSWIND > 0:
                 loss_parts.append(f"crosswind={loss_crosswind.item():.4f}")
+            if LOSS_W_STATION_SMOOTH > 0:
+                loss_parts.append(f"station_smooth={loss_station_smooth.item():.4f}")
             if LOSS_W_PLUME > 0:
                 loss_parts.append(f"plume={loss_plume.item():.4f}")
             if LOSS_W_SOURCE_LOCAL > 0:
                 loss_parts.append(f"source_local={loss_source_local.item():.4f}")
-            if LOSS_W_TIME_SMOOTH > 0:
-                loss_parts.append(f"time_smooth={loss_time_smooth.item():.4f}")
+            if LOSS_W_Q_SMOOTH > 0:
+                loss_parts.append(f"q_smooth={loss_q_smooth.item():.4f}")
             if LOSS_W_WIND > 0:
                 loss_parts.append(f"wind={loss_wind.item():.4f}")
             if LOSS_W_BOUNDARY > 0:

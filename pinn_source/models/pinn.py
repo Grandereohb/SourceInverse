@@ -15,7 +15,7 @@ class PINN(nn.Module):
         self.net = nn.Sequential(*layers)
 
         # Learnable physical parameters
-        self.logD = nn.Parameter(torch.tensor(0.0))  # D = exp(logD)
+        self.rawD = nn.Parameter(torch.tensor(0.0))
         self.logQ = nn.Parameter(torch.tensor(0.0))  # baseline source strength
         self.xs = nn.Parameter(torch.tensor(0.0))
         self.ys = nn.Parameter(torch.tensor(0.0))
@@ -34,7 +34,7 @@ class PINN(nn.Module):
         return self.net(xyt)
 
     def D(self):
-        return torch.exp(self.logD)
+        return torch.nn.functional.softplus(self.rawD) + 1e-6
 
     def Q(self, t=None):
         if t is None:
