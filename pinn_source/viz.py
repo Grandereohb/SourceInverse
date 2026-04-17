@@ -5,6 +5,8 @@ from matplotlib import animation
 import matplotlib.pyplot as plt
 
 from geo_utils import xy_to_latlon
+from config import VISUALIZE_GATE_ONLY, ADD_BASELINE_TO_VIZ
+from field import predict_concentration, field_components
 
 # Font config for CJK labels
 mpl.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "Arial Unicode MS"]
@@ -49,6 +51,11 @@ def diffusion_animation(
     t0,
     L,
     T,
+    t_w,
+    u_w,
+    v_w,
+    baseline_w,
+    sigma_src,
     c_scale=1.0,
     n_frames=40,
     nx=120,
@@ -72,9 +79,23 @@ def diffusion_animation(
         xyt[:, 1] = (xyt[:, 1] - y0) / L
         xyt[:, 2] = (xyt[:, 2] - t0) / T
         xyt_t = torch.tensor(xyt, dtype=torch.float32, device=device)
+        u_tf = np.interp(tf, t_w, u_w)
+        v_tf = np.interp(tf, t_w, v_w)
+        u_t = torch.full((xyt_t.shape[0], 1), float(u_tf), dtype=torch.float32, device=device)
+        v_t = torch.full((xyt_t.shape[0], 1), float(v_tf), dtype=torch.float32, device=device)
         with torch.no_grad():
-            cc = model(xyt_t).cpu().numpy().reshape(ny, nx)
+            if VISUALIZE_GATE_ONLY:
+                _, _, _, gate, _ = field_components(
+                    model, xyt_t, u_t, v_t, sigma_src=sigma_src
+                )
+                cc = gate.cpu().numpy().reshape(ny, nx)
+            else:
+                cc = predict_concentration(
+                    model, xyt_t, u_t, v_t, sigma_src=sigma_src
+                ).cpu().numpy().reshape(ny, nx)
         cc = cc * c_scale
+        if ADD_BASELINE_TO_VIZ and baseline_w is not None:
+            cc = cc + float(np.interp(tf, t_w, baseline_w))
         cc = np.clip(cc, 0, None)  # for visualization
         frames.append(cc)
 
@@ -133,7 +154,7 @@ def diffusion_animation(
     ax.set_ylabel("Latitude")
     ax.legend(loc="upper right")
     cbar = fig.colorbar(im, ax=ax)
-    cbar.set_label("Concentration")
+    cbar.set_label("Gate" if VISUALIZE_GATE_ONLY else "Concentration")
 
     def frame_fn(i):
         im.set_data(frames[i])

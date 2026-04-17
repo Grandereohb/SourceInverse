@@ -1,15 +1,29 @@
 # =========================
 # Data Paths
 # =========================
-SITE_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh\sites.xlsx"
-CONC_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh\concentration.xlsx"
-WIND_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh\wind.xlsx"
+SITE_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh_js\sites.xlsx"
+CONC_PATH = (
+    r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh_js\concentration.xlsx"
+)
+WIND_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh_js\wind.xlsx"
 
 # =========================
 # Model Selection
 # =========================
 # MODEL_NAME: model key used by model registry.
 MODEL_NAME = "pinn"
+
+# FIELD_MODE:
+# "default"       -> bg(t) + gate * (source_bias + plume_strength) * Q(t)
+# "no_gate"       -> bg(t) + plume_strength * Q(t)
+# "no_background" -> gate * (source_bias + plume_strength) * Q(t)
+# "minimal"       -> plume_strength * Q(t)
+FIELD_MODE = "no_background"
+
+# PDE_SOURCE_MODE:
+# "gaussian" -> keep Gaussian source term in PDE residual
+# "none"     -> disable PDE source term for ablation
+PDE_SOURCE_MODE = "gaussian"
 
 # =========================
 # Wind Direction Convention
@@ -40,13 +54,21 @@ DOMAIN_PAD_M = 500.0
 # Base multipliers before optional adaptive weighting.
 LOSS_W_DATA = 1.0
 LOSS_W_PDE = 1.0
-LOSS_W_PENALTY = 1.0
 
 # =========================
 # Source / Physics
 # =========================
 # SIGMA_SRC: source Gaussian width in normalized coordinates.
 SIGMA_SRC = 0.05
+
+# Gate-shape controls used by source_gate().
+GATE_CORE_SCALE = 1.0
+GATE_CROSS_SCALE = 2.5
+GATE_CROSS_MIN = 0.05
+GATE_STEEPNESS_SCALE = 1.5
+GATE_STEEPNESS_MIN = 0.04
+GATE_DECAY_SCALE = 6.0
+GATE_DECAY_MIN = 0.18
 
 # D_MIN_PHYS: lower bound of physical diffusion coefficient before normalization.
 D_MIN_PHYS = 500.0
@@ -82,29 +104,17 @@ COLLOC_PLUME_LENGTH = 1.0
 # =========================
 # Source-ID Extra Loss Weights
 # =========================
-# LOSS_W_RADIAL: weight for outward radial monotonicity constraint.
-LOSS_W_RADIAL = 0.0
-
-# LOSS_W_WIND: weight for upwind concentration suppression.
-LOSS_W_WIND = 0.0
-
 # LOSS_W_BOUNDARY: weight for source boundary repulsion penalty.
-LOSS_W_BOUNDARY = 0.0
+LOSS_W_BOUNDARY = 0.2
+ENABLE_LOSS_BOUNDARY = True
 
 # LOSS_W_AXIS: weight for plume-axis wind-alignment constraint.
 LOSS_W_AXIS = 1.0
-
-# LOSS_W_CROSSWIND: weight for suppressing excessive crosswind spreading.
-LOSS_W_CROSSWIND = 1.0
-
-# LOSS_W_STATION_SMOOTH: weight for suppressing artificial sharp peaks around station points.
-LOSS_W_STATION_SMOOTH = 1.0
-
-# LOSS_W_PLUME: weight for enforcing monotonic decay along downwind plume direction.
-LOSS_W_PLUME = 0.0
+ENABLE_LOSS_AXIS = True
 
 # LOSS_W_SOURCE_LOCAL: weight for keeping source-neighborhood concentration above far field.
-LOSS_W_SOURCE_LOCAL = 0.0
+LOSS_W_SOURCE_LOCAL = 1.0
+ENABLE_LOSS_SOURCE_LOCAL = True
 
 # SOURCE_LOCAL_MARGIN: required concentration margin between source neighborhood and far field.
 SOURCE_LOCAL_MARGIN = 0.2
@@ -112,35 +122,29 @@ SOURCE_LOCAL_MARGIN = 0.2
 # SOURCE_LOCAL_RING_R: normalized radius of the annulus used to compare source-center vs nearby field.
 SOURCE_LOCAL_RING_R = 0.12
 
-# LOSS_W_TIME_SMOOTH: weight for suppressing unrealistic temporal jumps at fixed locations.
-LOSS_W_TIME_SMOOTH = 0.1
-
-# LOSS_W_Q_SMOOTH: weight for suppressing unrealistic jumps in time-varying source strength Q(t).
-LOSS_W_Q_SMOOTH = 0.2
-
 # AXIS_UPDATE_INTERVAL: compute axis loss once every N epochs and reuse cached value in between.
 AXIS_UPDATE_INTERVAL = 5
 
 # =========================
 # Adaptive Loss Weighting
 # =========================
-# USE_ADAPTIVE_LOSS: whether to learn data/pde/penalty balancing weights.
+# USE_ADAPTIVE_LOSS: whether to learn data/pde balancing weights.
 USE_ADAPTIVE_LOSS = False
 
 # ADAPTIVE_LOSS_LR: optimizer learning rate for adaptive loss weights.
 ADAPTIVE_LOSS_LR = 1e-2
 
-# ADAPTIVE_INIT_LOG_VARS: initial log-variance values [data, pde, penalty].
-ADAPTIVE_INIT_LOG_VARS = [0.0, 0.0, 0.0]
+# ADAPTIVE_INIT_LOG_VARS: initial log-variance values [data, pde].
+ADAPTIVE_INIT_LOG_VARS = [0.0, 0.0]
 
 # ADAPTIVE_WARMUP_EPOCHS: fixed-weight warmup epochs before adaptive updates.
 ADAPTIVE_WARMUP_EPOCHS = 1000
 
-# ADAPTIVE_MIN_PRECISIONS: lower bound of adaptive precisions [data, pde, penalty].
-ADAPTIVE_MIN_PRECISIONS = [0.3, 1.0, 0.0]
+# ADAPTIVE_MIN_PRECISIONS: lower bound of adaptive precisions [data, pde].
+ADAPTIVE_MIN_PRECISIONS = [0.3, 1.0]
 
-# ADAPTIVE_MAX_PRECISIONS: upper bound of adaptive precisions [data, pde, penalty].
-ADAPTIVE_MAX_PRECISIONS = [10.0, 10.0, 10.0]
+# ADAPTIVE_MAX_PRECISIONS: upper bound of adaptive precisions [data, pde].
+ADAPTIVE_MAX_PRECISIONS = [10.0, 10.0]
 
 
 # =========================
@@ -149,8 +153,24 @@ ADAPTIVE_MAX_PRECISIONS = [10.0, 10.0, 10.0]
 # DATA_NORMALIZE: enable robust scaling for concentration target to improve optimization stability.
 DATA_NORMALIZE = True
 
+# TRAIN_ON_RESIDUAL: fit plume anomaly after subtracting a robust per-timestamp background baseline.
+TRAIN_ON_RESIDUAL = True
+
+# BASELINE_MODE: robust baseline estimator used when TRAIN_ON_RESIDUAL=True.
+# Supported: "median", "q25", "q40"
+BASELINE_MODE = "median"
+
 # DATA_SCALE_PERCENTILE: robust scale based on percentile(|c_obs|), used when DATA_NORMALIZE=True.
 DATA_SCALE_PERCENTILE = 85.0
+
+# DATA_HIGH_WEIGHT: extra weight multiplier for anomalously high observation residuals.
+DATA_HIGH_WEIGHT = 4.0
+
+# DATA_HIGH_PERCENTILE: observations above this residual percentile receive extra fitting weight.
+DATA_HIGH_PERCENTILE = 90.0
+
+# DATA_HIGH_POWER: nonlinearity of anomaly weighting; >1 emphasizes extreme peaks more strongly.
+DATA_HIGH_POWER = 1.0
 
 # DATA_WARMUP_EPOCHS: train with data-dominant objective in early epochs.
 DATA_WARMUP_EPOCHS = 300
@@ -163,6 +183,39 @@ PDE_RAMP_EPOCHS = 1000
 
 # MAX_GRAD_NORM: gradient clipping threshold for training stability (None or <=0 disables).
 MAX_GRAD_NORM = 10.0
+
+# DEBUG_EVERY: print field/PDE component diagnostics every N epochs.
+DEBUG_EVERY = 500
+
+# VISUALIZE_GATE_ONLY: when True, animation shows source_gate instead of concentration.
+VISUALIZE_GATE_ONLY = False
+
+# ADD_BASELINE_TO_VIZ: when training on residual plume, add observed baseline back in animation.
+ADD_BASELINE_TO_VIZ = True
+
+# LOSS_W_TOP_STATION: enforce that the highest observed station at each timestamp remains the highest predicted one.
+LOSS_W_TOP_STATION = 1.0
+
+# LOSS_W_HIGH_DOWNWIND: require clearly anomalous observed stations to lie downwind of the source.
+LOSS_W_HIGH_DOWNWIND = 2.0
+
+# HIGH_DOWNWIND_RATIO: within each timestamp, stations above this fraction of the max residual are treated as anomalous peaks.
+HIGH_DOWNWIND_RATIO = 0.6
+
+# HIGH_DOWNWIND_MIN_RELIEF: skip downwind constraint if the timestamp has no clear anomaly contrast.
+HIGH_DOWNWIND_MIN_RELIEF = 0.15
+
+# HIGH_DOWNWIND_MARGIN: minimum normalized downwind projection expected for anomalous stations.
+HIGH_DOWNWIND_MARGIN = 0.03
+
+# EARLY_STOP_START: earliest epoch where convergence-based early stopping can trigger.
+EARLY_STOP_START = 2500
+
+# EARLY_STOP_PATIENCE: number of epochs with no meaningful improvement before stopping.
+EARLY_STOP_PATIENCE = 800
+
+# EARLY_STOP_MIN_DELTA: minimum raw_loss improvement counted as real progress.
+EARLY_STOP_MIN_DELTA = 1e-4
 
 # =========================
 # Legacy (currently not used in pipeline)
