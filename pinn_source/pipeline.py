@@ -1,4 +1,5 @@
 import math
+import time
 import numpy as np
 import torch
 
@@ -12,8 +13,6 @@ from config import (
     SIGMA_SRC,
     LOSS_W_DATA,
     LOSS_W_PDE,
-    LOSS_W_BOUNDARY,
-    ENABLE_LOSS_BOUNDARY,
     LOSS_W_AXIS,
     ENABLE_LOSS_AXIS,
     LOSS_W_SOURCE_LOCAL,
@@ -21,6 +20,7 @@ from config import (
     SOURCE_LOCAL_MARGIN,
     SOURCE_LOCAL_RING_R,
     AXIS_UPDATE_INTERVAL,
+    AUX_LOSS_UPDATE_INTERVAL,
     PDE_SOURCE_MODE,
     D_MIN_PHYS,
     D_PERP_RATIO,
@@ -53,6 +53,10 @@ from config import (
     EARLY_STOP_MIN_DELTA,
     DEBUG_EVERY,
     LOSS_W_TOP_STATION,
+    LOSS_W_MULTI_HIGH,
+    MULTI_HIGH_RATIO,
+    MULTI_HIGH_MIN_RELIEF,
+    MULTI_HIGH_MARGIN,
     LOSS_W_HIGH_DOWNWIND,
     HIGH_DOWNWIND_RATIO,
     HIGH_DOWNWIND_MIN_RELIEF,
@@ -183,9 +187,16 @@ def run(site_path, conc_path, wind_path):
     x_min, x_max = (x_min_p - x0) / L, (x_max_p - x0) / L
     y_min, y_max = (y_min_p - y0) / L, (y_max_p - y0) / L
     t_min, t_max = (t_min_p - t0_p) / T, (t_max_p - t0_p) / T
-
     # Build tensors
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    if device.type == "cuda":
+        print(f"CUDA device: {torch.cuda.get_device_name(device)}")
+
+    def sync_device():
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+
     ModelCls = get_model(MODEL_NAME)
     model = ModelCls().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=LR)
@@ -208,7 +219,6 @@ def run(site_path, conc_path, wind_path):
     t_obs_t = torch.tensor(t_obs, dtype=torch.float32, device=device).view(-1, 1)
     u_obs_t = torch.tensor(u_obs, dtype=torch.float32, device=device).view(-1, 1)
     v_obs_t = torch.tensor(v_obs, dtype=torch.float32, device=device).view(-1, 1)
-
     # Robust concentration scaling for stable optimization
     c_scale = 1.0
     if DATA_NORMALIZE:
@@ -266,6 +276,10 @@ def run(site_path, conc_path, wind_path):
     t_w_t = torch.tensor(t_w, dtype=torch.float32, device=device).view(-1)
     u_w_t = torch.tensor(u_w, dtype=torch.float32, device=device).view(-1)
     v_w_t = torch.tensor(v_w, dtype=torch.float32, device=device).view(-1)
+    obs_time_indices = [
+        torch.tensor(np.where(np.isclose(t_obs, tw))[0], dtype=torch.long, device=device)
+        for tw in t_w
+    ]
 
     rng = np.random.default_rng(0)
 
@@ -328,7 +342,12 @@ def run(site_path, conc_path, wind_path):
     x_col_t, y_col_t, t_col_t, u_col_t, v_col_t = sample_collocation(xs0, ys0)
 
     axis_update_every = max(1, int(AXIS_UPDATE_INTERVAL))
+    aux_loss_update_every = max(1, int(AUX_LOSS_UPDATE_INTERVAL))
     axis_loss_cache = torch.tensor(0.0, device=device)
+    top_station_loss_cache = torch.tensor(0.0, device=device)
+    multi_high_loss_cache = torch.tensor(0.0, device=device)
+    high_downwind_loss_cache = torch.tensor(0.0, device=device)
+    source_local_loss_cache = torch.tensor(0.0, device=device)
     best_raw_loss = float("inf")
     early_stop_wait = 0
 
@@ -340,6 +359,15 @@ def run(site_path, conc_path, wind_path):
         )
 
     for epoch in range(1, EPOCHS + 1):
+        sync_device()
+        epoch_start_time = time.perf_counter()
+        timing_data_forward = 0.0
+        timing_obs_losses = 0.0
+        timing_pde = 0.0
+        timing_source_local = 0.0
+        timing_axis = 0.0
+        timing_backward = 0.0
+        timing_optimizer = 0.0
         opt.zero_grad()
         if adaptive_opt is not None:
             adaptive_opt.zero_grad()
@@ -353,6 +381,8 @@ def run(site_path, conc_path, wind_path):
             )
 
         # Data loss uses the plain observation graph; expensive station curvature is handled separately.
+        sync_device()
+        t_section = time.perf_counter()
         xyt_obs = torch.cat([x_obs_t, y_obs_t, t_obs_t], dim=1)
         xs = model.xs
         ys = model.ys
@@ -360,16 +390,25 @@ def run(site_path, conc_path, wind_path):
         bg_obs, plume_obs, q_obs, gate_obs, source_obs = field_components(
             model, xyt_obs, u_obs_t, v_obs_t, SIGMA_SRC
         )
+        c_pred_flat = c_pred.view(-1)
+        c_obs_flat = c_obs_t.view(-1)
+        x_obs_flat = x_obs_t.view(-1)
+        y_obs_flat = y_obs_t.view(-1)
+        sync_device()
+        timing_data_forward += time.perf_counter() - t_section
+
+        sync_device()
+        t_section = time.perf_counter()
         data_residual = c_pred - c_obs_t
         loss_data = torch.mean(data_weight_t * (data_residual**2))
-        if LOSS_W_TOP_STATION > 0:
+        aux_should_update = (epoch - 1) % aux_loss_update_every == 0
+        if LOSS_W_TOP_STATION > 0 and aux_should_update:
             top_station_losses = []
-            for i, t_i in enumerate(t_w_t):
-                mask_t = torch.isclose(t_obs_t.view(-1), t_i, atol=1e-6, rtol=0.0)
-                if not torch.any(mask_t):
+            for idx_t in obs_time_indices:
+                if idx_t.numel() == 0:
                     continue
-                pred_slice = c_pred.view(-1)[mask_t]
-                obs_slice = c_obs_t.view(-1)[mask_t]
+                pred_slice = c_pred_flat[idx_t]
+                obs_slice = c_obs_flat[idx_t]
                 top_idx = int(torch.argmax(obs_slice).item())
                 top_pred = pred_slice[top_idx]
                 if pred_slice.numel() > 1:
@@ -381,22 +420,66 @@ def run(site_path, conc_path, wind_path):
                 loss_top_station = torch.mean(torch.stack(top_station_losses))
             else:
                 loss_top_station = torch.tensor(0.0, device=device)
+            top_station_loss_cache = loss_top_station.detach()
+        elif LOSS_W_TOP_STATION > 0:
+            loss_top_station = top_station_loss_cache
         else:
             loss_top_station = torch.tensor(0.0, device=device)
 
-        if LOSS_W_HIGH_DOWNWIND > 0:
-            high_downwind_losses = []
-            t_obs_flat = t_obs_t.view(-1)
-            c_obs_flat = c_obs_t.view(-1)
-            x_obs_flat = x_obs_t.view(-1)
-            y_obs_flat = y_obs_t.view(-1)
-            for i, t_i in enumerate(t_w_t):
-                mask_t = torch.isclose(t_obs_flat, t_i, atol=1e-6, rtol=0.0)
-                if not torch.any(mask_t):
+        if LOSS_W_MULTI_HIGH > 0 and aux_should_update:
+            multi_high_losses = []
+            for idx_t in obs_time_indices:
+                if idx_t.numel() == 0:
                     continue
-                obs_slice = c_obs_flat[mask_t]
-                x_slice = x_obs_flat[mask_t]
-                y_slice = y_obs_flat[mask_t]
+                obs_slice = c_obs_flat[idx_t]
+                pred_slice = c_pred_flat[idx_t]
+                if obs_slice.numel() < 2:
+                    continue
+
+                obs_max = torch.max(obs_slice).detach()
+                obs_min = torch.min(obs_slice).detach()
+                relief = (obs_max - obs_min) / torch.clamp(torch.abs(obs_max), min=1e-6)
+                if float(relief.item()) < MULTI_HIGH_MIN_RELIEF:
+                    continue
+
+                high_cut = MULTI_HIGH_RATIO * obs_max
+                high_mask = obs_slice >= high_cut
+                if int(high_mask.sum().item()) < 2:
+                    continue
+
+                pred_max = torch.max(pred_slice).clamp_min(1e-6)
+                obs_high_norm = obs_slice[high_mask] / torch.clamp(obs_max, min=1e-6)
+                pred_high_norm = pred_slice[high_mask] / pred_max
+                shape_loss = torch.mean((pred_high_norm - obs_high_norm) ** 2)
+
+                low_mask = ~high_mask
+                if torch.any(low_mask):
+                    low_max = torch.max(pred_slice[low_mask])
+                    high_min = torch.min(pred_slice[high_mask])
+                    sep_loss = torch.relu(low_max + MULTI_HIGH_MARGIN - high_min)
+                else:
+                    sep_loss = torch.tensor(0.0, device=device)
+
+                multi_high_losses.append(shape_loss + sep_loss)
+
+            if multi_high_losses:
+                loss_multi_high = torch.mean(torch.stack(multi_high_losses))
+            else:
+                loss_multi_high = torch.tensor(0.0, device=device)
+            multi_high_loss_cache = loss_multi_high.detach()
+        elif LOSS_W_MULTI_HIGH > 0:
+            loss_multi_high = multi_high_loss_cache
+        else:
+            loss_multi_high = torch.tensor(0.0, device=device)
+
+        if LOSS_W_HIGH_DOWNWIND > 0 and aux_should_update:
+            high_downwind_losses = []
+            for i, idx_t in enumerate(obs_time_indices):
+                if idx_t.numel() == 0:
+                    continue
+                obs_slice = c_obs_flat[idx_t]
+                x_slice = x_obs_flat[idx_t]
+                y_slice = y_obs_flat[idx_t]
 
                 obs_max = torch.max(obs_slice).detach()
                 obs_min = torch.min(obs_slice).detach()
@@ -429,10 +512,17 @@ def run(site_path, conc_path, wind_path):
                 loss_high_downwind = torch.mean(torch.stack(high_downwind_losses))
             else:
                 loss_high_downwind = torch.tensor(0.0, device=device)
+            high_downwind_loss_cache = loss_high_downwind.detach()
+        elif LOSS_W_HIGH_DOWNWIND > 0:
+                loss_high_downwind = high_downwind_loss_cache
         else:
             loss_high_downwind = torch.tensor(0.0, device=device)
+        sync_device()
+        timing_obs_losses += time.perf_counter() - t_section
 
         # PDE residual
+        sync_device()
+        t_section = time.perf_counter()
         xyt_col = torch.cat([x_col_t, y_col_t, t_col_t], dim=1).requires_grad_(True)
         c_col = predict_concentration(model, xyt_col, u_col_t, v_col_t, SIGMA_SRC)
 
@@ -508,10 +598,14 @@ def run(site_path, conc_path, wind_path):
         w = torch.exp(-(dx**2 + dy**2) / (2 * RESIDUAL_R**2))
         w = 1.0 + RESIDUAL_W_SCALE * w
         loss_pde = torch.mean((w * residual) ** 2)
+        sync_device()
+        timing_pde += time.perf_counter() - t_section
 
         # Extra physically constrained source-identification losses
         # 1) Source-local dominance: concentration at source center should exceed a nearby annulus.
-        if ENABLE_LOSS_SOURCE_LOCAL and LOSS_W_SOURCE_LOCAL > 0:
+        sync_device()
+        t_section = time.perf_counter()
+        if ENABLE_LOSS_SOURCE_LOCAL and LOSS_W_SOURCE_LOCAL > 0 and aux_should_update:
             t_probe = t_w_t.view(-1, 1)
             center_x = xs.expand_as(t_probe)
             center_y = ys.expand_as(t_probe)
@@ -528,40 +622,45 @@ def run(site_path, conc_path, wind_path):
             ring_r = max(SOURCE_LOCAL_RING_R, SIGMA_SRC * 2.0)
             ring_x = xs + ring_r * torch.cos(theta)
             ring_y = ys + ring_r * torch.sin(theta)
-            ring_pts = []
-            for t_i in t_w_t:
-                t_row = torch.full_like(theta, t_i)
-                ring_pts.append(torch.stack([ring_x, ring_y, t_row], dim=1))
-            ring_pts = torch.cat(ring_pts, dim=0)
+            n_time = t_w_t.numel()
+            n_theta = theta.numel()
+            ring_pts = torch.stack(
+                [
+                    ring_x.unsqueeze(0).repeat(n_time, 1).reshape(-1),
+                    ring_y.unsqueeze(0).repeat(n_time, 1).reshape(-1),
+                    t_w_t.view(-1, 1).repeat(1, n_theta).reshape(-1),
+                ],
+                dim=1,
+            )
             ring_u = center_u.repeat_interleave(theta.numel(), dim=0)
             ring_v = center_v.repeat_interleave(theta.numel(), dim=0)
             c_ring = predict_concentration(model, ring_pts, ring_u, ring_v, SIGMA_SRC)
             loss_source_local = torch.relu(
                 torch.mean(c_ring) + SOURCE_LOCAL_MARGIN - torch.mean(c_center)
             )
+            source_local_loss_cache = loss_source_local.detach()
+        elif ENABLE_LOSS_SOURCE_LOCAL and LOSS_W_SOURCE_LOCAL > 0:
+            loss_source_local = source_local_loss_cache
         else:
             loss_source_local = torch.tensor(0.0, device=device)
+        sync_device()
+        timing_source_local += time.perf_counter() - t_section
 
         # 2) Plume-axis geometric constraint (time-sliced, observation points):
         # compute every N epochs and reuse cached scalar in between for speed.
+        sync_device()
+        t_section = time.perf_counter()
         if ENABLE_LOSS_AXIS and LOSS_W_AXIS > 0 and (epoch - 1) % axis_update_every == 0:
-            c_obs_flat = c_pred.view(-1)
-            x_obs_flat = x_obs_t.view(-1)
-            y_obs_flat = y_obs_t.view(-1)
-            t_obs_flat = t_obs_t.view(-1)
             axis_losses = []
             axis_min_rel_contrast = 0.05
 
-            for i in range(t_w_t.numel()):
-                t_i = t_w_t[i]
-                mask_t = torch.isclose(t_obs_flat, t_i, atol=1e-6, rtol=0.0)
-                n_t = int(mask_t.sum().item())
-                if n_t == 0:
+            for i, idx_t in enumerate(obs_time_indices):
+                if idx_t.numel() == 0:
                     continue
 
-                c_slice = c_obs_flat[mask_t]
-                x_slice = x_obs_flat[mask_t]
-                y_slice = y_obs_flat[mask_t]
+                c_slice = c_pred_flat[idx_t]
+                x_slice = x_obs_flat[idx_t]
+                y_slice = y_obs_flat[idx_t]
 
                 # Skip axis loss when station concentrations are too similar.
                 c_max = torch.max(c_slice).detach()
@@ -574,7 +673,7 @@ def run(site_path, conc_path, wind_path):
                 high_mask = c_slice >= q90
 
                 # If only one high-concentration point is selected, include the second-largest point.
-                if int(high_mask.sum().item()) == 1 and n_t >= 2:
+                if int(high_mask.sum().item()) == 1 and idx_t.numel() >= 2:
                     top2 = torch.topk(c_slice.detach(), k=2).indices
                     high_mask[top2[1]] = True
 
@@ -605,27 +704,16 @@ def run(site_path, conc_path, wind_path):
             loss_axis = axis_loss_cache
         else:
             loss_axis = torch.tensor(0.0, device=device)
+        sync_device()
+        timing_axis += time.perf_counter() - t_section
 
         data_term = LOSS_W_DATA * loss_data
         pde_term = LOSS_W_PDE * loss_pde
         source_local_term = LOSS_W_SOURCE_LOCAL * loss_source_local
         axis_term = LOSS_W_AXIS * loss_axis
         top_station_term = LOSS_W_TOP_STATION * loss_top_station
+        multi_high_term = LOSS_W_MULTI_HIGH * loss_multi_high
         high_downwind_term = LOSS_W_HIGH_DOWNWIND * loss_high_downwind
-
-        # Boundary repulsion to avoid source collapsing to domain corners.
-        dist_left = xs - x_min
-        dist_right = x_max - xs
-        dist_bottom = ys - y_min
-        dist_top = y_max - ys
-        min_dist_to_boundary = torch.min(
-            torch.stack([dist_left, dist_right, dist_bottom, dist_top])
-        ).clamp_min(1e-6)
-        loss_boundary = 1.0 / min_dist_to_boundary
-        if ENABLE_LOSS_BOUNDARY and LOSS_W_BOUNDARY > 0:
-            boundary_term = LOSS_W_BOUNDARY * loss_boundary
-        else:
-            boundary_term = torch.tensor(0.0, device=device)
 
         # Data-oriented warmup + smooth PDE ramp to avoid catastrophic forgetting
         if epoch <= DATA_WARMUP_EPOCHS:
@@ -639,9 +727,9 @@ def run(site_path, conc_path, wind_path):
             data_term
             + pde_term_eff
             + source_local_term
-            + boundary_term
             + axis_term
             + top_station_term
+            + multi_high_term
             + high_downwind_term
         )
 
@@ -656,16 +744,20 @@ def run(site_path, conc_path, wind_path):
             train_loss = (
                 train_loss
                 + source_local_term
-                + boundary_term
                 + axis_term
                 + top_station_term
+                + multi_high_term
                 + high_downwind_term
             )
         else:
             train_loss = raw_loss
             adaptive_weights = None
 
+        sync_device()
+        t_section = time.perf_counter()
         train_loss.backward()
+        sync_device()
+        timing_backward += time.perf_counter() - t_section
 
         # Clip gradients to reduce sudden divergence after PDE ramps up
         if MAX_GRAD_NORM is not None and MAX_GRAD_NORM > 0:
@@ -679,9 +771,13 @@ def run(site_path, conc_path, wind_path):
         # if model.ys.grad is not None:
         #     grad_ys = float(model.ys.grad.detach().abs().item())
 
+        sync_device()
+        t_section = time.perf_counter()
         opt.step()
         if adaptive_opt is not None and epoch > adaptive_start_epoch:
             adaptive_opt.step()
+        sync_device()
+        timing_optimizer += time.perf_counter() - t_section
 
         raw_loss_value = float(raw_loss.detach().item())
         if epoch >= EARLY_STOP_START:
@@ -711,12 +807,12 @@ def run(site_path, conc_path, wind_path):
             ]
             if ENABLE_LOSS_SOURCE_LOCAL and LOSS_W_SOURCE_LOCAL > 0:
                 loss_parts.append(f"source_local={loss_source_local.item():.4f}")
-            if ENABLE_LOSS_BOUNDARY and LOSS_W_BOUNDARY > 0:
-                loss_parts.append(f"boundary={loss_boundary.item():.4f}")
             if ENABLE_LOSS_AXIS and LOSS_W_AXIS > 0:
                 loss_parts.append(f"axis={loss_axis.item():.4f}")
             if LOSS_W_TOP_STATION > 0:
                 loss_parts.append(f"top_station={loss_top_station.item():.4f}")
+            if LOSS_W_MULTI_HIGH > 0:
+                loss_parts.append(f"multi_high={loss_multi_high.item():.4f}")
             if LOSS_W_HIGH_DOWNWIND > 0:
                 loss_parts.append(f"high_downwind={loss_high_downwind.item():.4f}")
             print(
@@ -725,6 +821,19 @@ def run(site_path, conc_path, wind_path):
                 f"D={D.item():.3e}, Q_mean={Q_mean.item():.4f}, "
                 f"xs={xs.item():.3f}, ys={ys.item():.3f}, pde_factor={pde_factor:.3f}"
                 f"{extra}"
+            )
+            sync_device()
+            epoch_total_time = time.perf_counter() - epoch_start_time
+            print(
+                "Timing: "
+                f"data_forward={timing_data_forward:.3f}s, "
+                f"obs_losses={timing_obs_losses:.3f}s, "
+                f"pde={timing_pde:.3f}s, "
+                f"source_local={timing_source_local:.3f}s, "
+                f"axis={timing_axis:.3f}s, "
+                f"backward={timing_backward:.3f}s, "
+                f"optimizer={timing_optimizer:.3f}s, "
+                f"epoch_total={epoch_total_time:.3f}s"
             )
         if DEBUG_EVERY > 0 and epoch % DEBUG_EVERY == 0:
             if TRAIN_ON_RESIDUAL:

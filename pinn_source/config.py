@@ -43,7 +43,7 @@ EPOCHS = 5000
 LR = 1e-3
 
 # N_COLLOCATION: number of PDE collocation points per cycle.
-N_COLLOCATION = 5000
+N_COLLOCATION = 4000
 
 # DOMAIN_PAD_M: extra padding (meters) added around station bounding box.
 DOMAIN_PAD_M = 500.0
@@ -104,10 +104,6 @@ COLLOC_PLUME_LENGTH = 1.0
 # =========================
 # Source-ID Extra Loss Weights
 # =========================
-# LOSS_W_BOUNDARY: weight for source boundary repulsion penalty.
-LOSS_W_BOUNDARY = 0.2
-ENABLE_LOSS_BOUNDARY = True
-
 # LOSS_W_AXIS: weight for plume-axis wind-alignment constraint.
 LOSS_W_AXIS = 1.0
 ENABLE_LOSS_AXIS = True
@@ -124,6 +120,10 @@ SOURCE_LOCAL_RING_R = 0.12
 
 # AXIS_UPDATE_INTERVAL: compute axis loss once every N epochs and reuse cached value in between.
 AXIS_UPDATE_INTERVAL = 5
+
+# AUX_LOSS_UPDATE_INTERVAL: compute top_station / multi_high / high_downwind / source_local
+# once every N epochs and reuse cached values in between.
+AUX_LOSS_UPDATE_INTERVAL = 3
 
 # =========================
 # Adaptive Loss Weighting
@@ -161,13 +161,13 @@ TRAIN_ON_RESIDUAL = True
 BASELINE_MODE = "median"
 
 # DATA_SCALE_PERCENTILE: robust scale based on percentile(|c_obs|), used when DATA_NORMALIZE=True.
-DATA_SCALE_PERCENTILE = 85.0
+DATA_SCALE_PERCENTILE = 95.0
 
 # DATA_HIGH_WEIGHT: extra weight multiplier for anomalously high observation residuals.
-DATA_HIGH_WEIGHT = 4.0
+DATA_HIGH_WEIGHT = 2.0
 
 # DATA_HIGH_PERCENTILE: observations above this residual percentile receive extra fitting weight.
-DATA_HIGH_PERCENTILE = 90.0
+DATA_HIGH_PERCENTILE = 95.0
 
 # DATA_HIGH_POWER: nonlinearity of anomaly weighting; >1 emphasizes extreme peaks more strongly.
 DATA_HIGH_POWER = 1.0
@@ -196,6 +196,18 @@ ADD_BASELINE_TO_VIZ = True
 # LOSS_W_TOP_STATION: enforce that the highest observed station at each timestamp remains the highest predicted one.
 LOSS_W_TOP_STATION = 1.0
 
+# LOSS_W_MULTI_HIGH: enforce simultaneous fitting of multiple high-valued stations at the same timestamp.
+LOSS_W_MULTI_HIGH = 2.0
+
+# MULTI_HIGH_RATIO: stations above this fraction of the timestamp maximum residual are treated as joint high-value points.
+MULTI_HIGH_RATIO = 0.5
+
+# MULTI_HIGH_MIN_RELIEF: skip the multi-high constraint if the timestamp has weak anomaly contrast.
+MULTI_HIGH_MIN_RELIEF = 0.15
+
+# MULTI_HIGH_MARGIN: high-value stations should exceed non-high stations by at least this normalized margin.
+MULTI_HIGH_MARGIN = 0.05
+
 # LOSS_W_HIGH_DOWNWIND: require clearly anomalous observed stations to lie downwind of the source.
 LOSS_W_HIGH_DOWNWIND = 2.0
 
@@ -207,6 +219,7 @@ HIGH_DOWNWIND_MIN_RELIEF = 0.15
 
 # HIGH_DOWNWIND_MARGIN: minimum normalized downwind projection expected for anomalous stations.
 HIGH_DOWNWIND_MARGIN = 0.03
+
 
 # EARLY_STOP_START: earliest epoch where convergence-based early stopping can trigger.
 EARLY_STOP_START = 2500
