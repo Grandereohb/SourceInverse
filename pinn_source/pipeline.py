@@ -40,13 +40,31 @@ from config import (
     DATA_NORMALIZE,
     TRAIN_ON_RESIDUAL,
     BASELINE_MODE,
+    ENABLE_EVENT_WINDOW_CROP,
+    EVENT_WINDOW_MIN_MAX,
+    EVENT_WINDOW_MIN_RELIEF,
+    EVENT_WINDOW_PAD_STEPS,
     DATA_SCALE_PERCENTILE,
     DATA_HIGH_WEIGHT,
     DATA_HIGH_PERCENTILE,
     DATA_HIGH_POWER,
+    DATA_TIME_PEAK_WEIGHT,
+    DATA_TIME_PEAK_RATIO,
+    DATA_TIME_PEAK_POWER,
+    DATA_TIME_PEAK_MIN_RELIEF,
+    EVENT_TIME_WEIGHT,
+    EVENT_PEAK_WEIGHT,
+    EVENT_PEAK_RATIO,
     DATA_WARMUP_EPOCHS,
     DATA_WARMUP_PDE_FACTOR,
     PDE_RAMP_EPOCHS,
+    STAGE1_EPOCHS,
+    STAGE1_PDE_FACTOR,
+    STAGE1_DATA_MULT,
+    STAGE1_TOP_STATION_MULT,
+    STAGE1_MULTI_HIGH_MULT,
+    STAGE1_HIGH_DOWNWIND_MULT,
+    STAGE1_SOURCE_LOCAL_MULT,
     MAX_GRAD_NORM,
     EARLY_STOP_START,
     EARLY_STOP_PATIENCE,
@@ -66,7 +84,7 @@ from data_io import load_sites, load_wind, load_conc, wind_dir_to_uv
 from model_registry import get_model
 from adaptive_loss import AdaptiveLossWeights
 from field import predict_concentration, field_components
-from viz import plot_sites_and_source, diffusion_animation
+from viz import plot_sites_and_source, diffusion_animation, plot_station_timeseries
 
 
 def run(site_path, conc_path, wind_path):
@@ -111,8 +129,48 @@ def run(site_path, conc_path, wind_path):
         baseline_series = np.zeros(len(data), dtype=np.float64)
     baseline_vals = baseline_series.to_numpy(dtype=np.float64)
 
+    # Keep only the main anomaly window if requested, with a small time padding on both ends.
+    if ENABLE_EVENT_WINDOW_CROP:
+        residual_matrix = np.clip(
+            station_matrix.to_numpy(dtype=np.float64) - baseline_vals[:, None],
+            a_min=0.0,
+            a_max=None,
+        )
+        ts_max = residual_matrix.max(axis=1)
+        ts_med = np.median(residual_matrix, axis=1)
+        ts_relief = (ts_max - ts_med) / np.maximum(np.abs(ts_max), 1e-6)
+        event_mask = (ts_max >= EVENT_WINDOW_MIN_MAX) & (
+            ts_relief >= EVENT_WINDOW_MIN_RELIEF
+        )
+
+        event_indices = np.flatnonzero(event_mask)
+        if event_indices.size > 0:
+            start_idx = max(0, int(event_indices[0]) - int(EVENT_WINDOW_PAD_STEPS))
+            end_idx = min(
+                len(data) - 1,
+                int(event_indices[-1]) + int(EVENT_WINDOW_PAD_STEPS),
+            )
+            keep_mask = np.zeros(len(data), dtype=bool)
+            keep_mask[start_idx : end_idx + 1] = True
+            data = data.loc[keep_mask].reset_index(drop=True)
+            station_matrix = data[valid_stations].astype(float)
+            baseline_series = baseline_series.loc[keep_mask].reset_index(drop=True)
+            baseline_vals = baseline_series.to_numpy(dtype=np.float64)
+            print(
+                "Event window crop: "
+                f"kept_rows={keep_mask.sum()}/{len(keep_mask)}, "
+                f"start={data.loc[0, 'time']}, end={data.loc[len(data)-1, 'time']}, "
+                f"pad_steps={EVENT_WINDOW_PAD_STEPS}"
+            )
+        else:
+            print(
+                "Event window crop: no anomaly window detected, using full time range."
+            )
+
     # Build observation dataset
     obs = []
+    obs_station_labels = []
+    obs_time_labels = []
     for row_idx, (_, row) in enumerate(data.iterrows()):
         u, v = wind_dir_to_uv(row["dir"], row["sp"], is_from=WIND_DIR_IS_FROM)
         for _, srow in sites_plot.iterrows():
@@ -133,6 +191,8 @@ def run(site_path, conc_path, wind_path):
                     v,
                 ]
             )
+            obs_station_labels.append(st)
+            obs_time_labels.append(row["time"])
     if not obs:
         raise ValueError("No observation data matched station names. Check columns.")
 
@@ -145,6 +205,7 @@ def run(site_path, conc_path, wind_path):
     c_obs_baseline = obs[:, 5]
     u_obs = obs[:, 6]
     v_obs = obs[:, 7]
+    t_obs_group = obs[:, 2].copy()
 
     # Normalize time to start at 0 and in hours
     t0 = np.min(t_obs)
@@ -203,7 +264,7 @@ def run(site_path, conc_path, wind_path):
     adaptive_loss = None
     adaptive_opt = None
     adaptive_start_epoch = max(
-        ADAPTIVE_WARMUP_EPOCHS, DATA_WARMUP_EPOCHS + PDE_RAMP_EPOCHS
+        ADAPTIVE_WARMUP_EPOCHS, STAGE1_EPOCHS + PDE_RAMP_EPOCHS
     )
     if USE_ADAPTIVE_LOSS:
         adaptive_loss = AdaptiveLossWeights(
@@ -239,6 +300,54 @@ def run(site_path, conc_path, wind_path):
     else:
         high_ref = 0.0
         data_weights = np.ones_like(c_obs)
+
+    if DATA_TIME_PEAK_WEIGHT > 0:
+        time_peak_weights = np.ones_like(c_obs)
+        unique_obs_times = np.unique(t_obs_group)
+        for t_key in unique_obs_times:
+            mask_t = np.isclose(t_obs_group, t_key)
+            c_slice = c_obs[mask_t]
+            if c_slice.size == 0:
+                continue
+            c_max = float(np.max(c_slice))
+            c_med = float(np.median(c_slice))
+            relief = (c_max - c_med) / max(abs(c_max), 1e-6)
+            if relief < DATA_TIME_PEAK_MIN_RELIEF:
+                continue
+            high_cut = DATA_TIME_PEAK_RATIO * c_max
+            denom = max(c_max - high_cut, 1e-6)
+            local_excess = np.clip((c_slice - high_cut) / denom, a_min=0.0, a_max=None)
+            time_peak_weights[mask_t] = 1.0 + DATA_TIME_PEAK_WEIGHT * np.power(
+                local_excess, DATA_TIME_PEAK_POWER
+            )
+        data_weights = data_weights * time_peak_weights
+    else:
+        time_peak_weights = np.ones_like(c_obs)
+
+    event_time_weights = np.ones_like(c_obs)
+    event_peak_weights = np.ones_like(c_obs)
+    if EVENT_TIME_WEIGHT > 0 or EVENT_PEAK_WEIGHT > 0:
+        unique_obs_times = np.unique(t_obs_group)
+        for t_key in unique_obs_times:
+            mask_t = np.isclose(t_obs_group, t_key)
+            c_slice = c_obs[mask_t]
+            if c_slice.size == 0:
+                continue
+            c_max = float(np.max(c_slice))
+            c_med = float(np.median(c_slice))
+            relief = (c_max - c_med) / max(abs(c_max), 1e-6)
+            is_event_time = (c_max >= EVENT_WINDOW_MIN_MAX) and (
+                relief >= EVENT_WINDOW_MIN_RELIEF
+            )
+            if not is_event_time:
+                continue
+            if EVENT_TIME_WEIGHT > 0:
+                event_time_weights[mask_t] = EVENT_TIME_WEIGHT
+            if EVENT_PEAK_WEIGHT > 0:
+                peak_mask = c_slice >= (EVENT_PEAK_RATIO * c_max)
+                idx_t = np.flatnonzero(mask_t)
+                event_peak_weights[idx_t[peak_mask]] = EVENT_PEAK_WEIGHT
+        data_weights = data_weights * event_time_weights * event_peak_weights
     data_weight_t = torch.tensor(data_weights, dtype=torch.float32, device=device).view(-1, 1)
     print(
         f"Data summary: n_obs={len(c_obs)}, fit_min={np.min(c_obs):.3f}, fit_p50={np.percentile(c_obs, 50):.3f}, "
@@ -257,6 +366,19 @@ def run(site_path, conc_path, wind_path):
         f"Anomaly-weight summary: high_ref={high_ref:.3f}, "
         f"w_mean={np.mean(data_weights):.3f}, w_max={np.max(data_weights):.3f}"
     )
+    if DATA_TIME_PEAK_WEIGHT > 0:
+        print(
+            f"Time-peak-weight summary: w_mean={np.mean(time_peak_weights):.3f}, "
+            f"w_max={np.max(time_peak_weights):.3f}, ratio={DATA_TIME_PEAK_RATIO:.2f}, "
+            f"min_relief={DATA_TIME_PEAK_MIN_RELIEF:.2f}"
+        )
+    if EVENT_TIME_WEIGHT > 0 or EVENT_PEAK_WEIGHT > 0:
+        print(
+            f"Event-weight summary: time_w_mean={np.mean(event_time_weights):.3f}, "
+            f"time_w_max={np.max(event_time_weights):.3f}, "
+            f"peak_w_mean={np.mean(event_peak_weights):.3f}, "
+            f"peak_w_max={np.max(event_peak_weights):.3f}"
+        )
 
     # Precompute wind time series for collocation interpolation
     t_w = np.unique(t_obs)
@@ -707,20 +829,45 @@ def run(site_path, conc_path, wind_path):
         sync_device()
         timing_axis += time.perf_counter() - t_section
 
-        data_term = LOSS_W_DATA * loss_data
-        pde_term = LOSS_W_PDE * loss_pde
-        source_local_term = LOSS_W_SOURCE_LOCAL * loss_source_local
-        axis_term = LOSS_W_AXIS * loss_axis
-        top_station_term = LOSS_W_TOP_STATION * loss_top_station
-        multi_high_term = LOSS_W_MULTI_HIGH * loss_multi_high
-        high_downwind_term = LOSS_W_HIGH_DOWNWIND * loss_high_downwind
-
-        # Data-oriented warmup + smooth PDE ramp to avoid catastrophic forgetting
-        if epoch <= DATA_WARMUP_EPOCHS:
-            pde_factor = DATA_WARMUP_PDE_FACTOR
+        # Two-stage schedule:
+        # stage 1: prioritize fitting anomaly amplitudes / high-value stations
+        # stage 2: smoothly restore full physics-consistent weighting
+        if epoch <= STAGE1_EPOCHS:
+            stage_blend = 0.0
         else:
-            ramp = min(1.0, (epoch - DATA_WARMUP_EPOCHS) / max(1, PDE_RAMP_EPOCHS))
-            pde_factor = DATA_WARMUP_PDE_FACTOR + (1.0 - DATA_WARMUP_PDE_FACTOR) * ramp
+            stage_blend = min(1.0, (epoch - STAGE1_EPOCHS) / max(1, PDE_RAMP_EPOCHS))
+
+        curr_data_mult = STAGE1_DATA_MULT + (1.0 - STAGE1_DATA_MULT) * stage_blend
+        curr_top_mult = STAGE1_TOP_STATION_MULT + (1.0 - STAGE1_TOP_STATION_MULT) * stage_blend
+        curr_multi_mult = STAGE1_MULTI_HIGH_MULT + (1.0 - STAGE1_MULTI_HIGH_MULT) * stage_blend
+        curr_high_downwind_mult = (
+            STAGE1_HIGH_DOWNWIND_MULT
+            + (1.0 - STAGE1_HIGH_DOWNWIND_MULT) * stage_blend
+        )
+        curr_source_local_mult = (
+            STAGE1_SOURCE_LOCAL_MULT
+            + (1.0 - STAGE1_SOURCE_LOCAL_MULT) * stage_blend
+        )
+
+        data_term = LOSS_W_DATA * curr_data_mult * loss_data
+        pde_term = LOSS_W_PDE * loss_pde
+        source_local_term = (
+            LOSS_W_SOURCE_LOCAL * curr_source_local_mult * loss_source_local
+        )
+        axis_term = LOSS_W_AXIS * loss_axis
+        top_station_term = LOSS_W_TOP_STATION * curr_top_mult * loss_top_station
+        multi_high_term = LOSS_W_MULTI_HIGH * curr_multi_mult * loss_multi_high
+        high_downwind_term = (
+            LOSS_W_HIGH_DOWNWIND * curr_high_downwind_mult * loss_high_downwind
+        )
+
+        # Stage-aware PDE schedule:
+        # early stage keeps PDE weak so the model first learns observation peaks,
+        # then ramps to full physics after STAGE1_EPOCHS.
+        if epoch <= STAGE1_EPOCHS:
+            pde_factor = STAGE1_PDE_FACTOR
+        else:
+            pde_factor = STAGE1_PDE_FACTOR + (1.0 - STAGE1_PDE_FACTOR) * stage_blend
         pde_term_eff = pde_factor * pde_term
 
         raw_loss = (
@@ -819,7 +966,8 @@ def run(site_path, conc_path, wind_path):
                 f"Epoch {epoch}: raw_loss={raw_loss.item():4f}, "
                 f"{', '.join(loss_parts)}, "
                 f"D={D.item():.3e}, Q_mean={Q_mean.item():.4f}, "
-                f"xs={xs.item():.3f}, ys={ys.item():.3f}, pde_factor={pde_factor:.3f}"
+                f"xs={xs.item():.3f}, ys={ys.item():.3f}, pde_factor={pde_factor:.3f}, "
+                f"data_mult={curr_data_mult:.2f}, multi_mult={curr_multi_mult:.2f}"
                 f"{extra}"
             )
             sync_device()
@@ -872,6 +1020,22 @@ def run(site_path, conc_path, wind_path):
 
     print("Estimated source (x,y) meters:", xs_p, ys_p)
     print("Estimated source (lat,lon):", pred_lat, pred_lon)
+
+    xyt_diag = torch.cat([x_obs_t, y_obs_t, t_obs_t], dim=1)
+    with torch.no_grad():
+        pred_diag = predict_concentration(model, xyt_diag, u_obs_t, v_obs_t, SIGMA_SRC)
+        if TRAIN_ON_RESIDUAL:
+            pred_diag_raw = pred_diag * c_scale + c_obs_baseline_t
+        else:
+            pred_diag_raw = pred_diag * c_scale
+
+    plot_station_timeseries(
+        times=np.array(obs_time_labels, dtype="datetime64[ns]"),
+        station_names=np.array(obs_station_labels, dtype=object),
+        obs_values=c_obs_raw,
+        pred_values=pred_diag_raw.detach().cpu().numpy().reshape(-1),
+        title="Observed vs Predicted Concentration by Station",
+    )
 
     plot_sites_and_source(sites_plot, pred_lon, pred_lat)
 

@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import matplotlib as mpl
+import pandas as pd
 from matplotlib import animation
 import matplotlib.pyplot as plt
 
@@ -165,4 +166,57 @@ def diffusion_animation(
         fig, frame_fn, frames=n_frames, interval=200, blit=False
     )
     ani.save(out_gif, writer="pillow", fps=5)
+    plt.show()
+
+
+def plot_station_timeseries(
+    times,
+    station_names,
+    obs_values,
+    pred_values,
+    title="Observed vs Predicted Concentration",
+):
+    times = np.asarray(times)
+    station_names = np.asarray(station_names)
+    obs_values = np.asarray(obs_values, dtype=float)
+    pred_values = np.asarray(pred_values, dtype=float)
+
+    unique_stations = list(dict.fromkeys(station_names.tolist()))
+    n_station = len(unique_stations)
+    if n_station == 0:
+        return
+
+    ncols = 2 if n_station > 1 else 1
+    nrows = int(np.ceil(n_station / ncols))
+    fig, axes = plt.subplots(
+        nrows=nrows,
+        ncols=ncols,
+        figsize=(7 * ncols, 3.6 * nrows),
+        squeeze=False,
+        sharex=False,
+    )
+    axes_flat = axes.ravel()
+
+    for ax, station in zip(axes_flat, unique_stations):
+        mask = station_names == station
+        station_times = pd.to_datetime(times[mask]).to_numpy()
+        order = np.argsort(station_times)
+        station_times = station_times[order]
+        station_obs = obs_values[mask][order]
+        station_pred = pred_values[mask][order]
+
+        ax.plot(station_times, station_obs, color="#1f77b4", lw=1.8, label="Observed")
+        ax.plot(station_times, station_pred, color="#d62728", lw=1.6, ls="--", label="Predicted")
+        ax.set_title(str(station))
+        ax.set_ylabel("Concentration")
+        ax.grid(True, alpha=0.3)
+        ax.tick_params(axis="x", rotation=25)
+
+    for ax in axes_flat[n_station:]:
+        ax.axis("off")
+
+    handles, labels = axes_flat[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=2, frameon=True)
+    fig.suptitle(title)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
     plt.show()

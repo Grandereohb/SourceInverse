@@ -160,6 +160,18 @@ TRAIN_ON_RESIDUAL = True
 # Supported: "median", "q25", "q40"
 BASELINE_MODE = "median"
 
+# ENABLE_EVENT_WINDOW_CROP: keep only the main anomaly window (with small padding) for training.
+ENABLE_EVENT_WINDOW_CROP = True
+
+# EVENT_WINDOW_MIN_MAX: minimum residual max at a timestamp to mark it as part of the anomaly event.
+EVENT_WINDOW_MIN_MAX = 1.0
+
+# EVENT_WINDOW_MIN_RELIEF: minimum relative contrast needed to regard a timestamp as anomalous.
+EVENT_WINDOW_MIN_RELIEF = 0.15
+
+# EVENT_WINDOW_PAD_STEPS: number of timestamps kept before the first and after the last anomalous timestamp.
+EVENT_WINDOW_PAD_STEPS = 2
+
 # DATA_SCALE_PERCENTILE: robust scale based on percentile(|c_obs|), used when DATA_NORMALIZE=True.
 DATA_SCALE_PERCENTILE = 95.0
 
@@ -172,6 +184,27 @@ DATA_HIGH_PERCENTILE = 95.0
 # DATA_HIGH_POWER: nonlinearity of anomaly weighting; >1 emphasizes extreme peaks more strongly.
 DATA_HIGH_POWER = 1.0
 
+# DATA_TIME_PEAK_WEIGHT: extra per-timestamp weight for stations that are locally high at a given time.
+DATA_TIME_PEAK_WEIGHT = 4.0
+
+# DATA_TIME_PEAK_RATIO: stations above this fraction of the timestamp max residual receive time-local boost.
+DATA_TIME_PEAK_RATIO = 0.6
+
+# DATA_TIME_PEAK_POWER: nonlinearity for the within-timestamp anomaly boost.
+DATA_TIME_PEAK_POWER = 1.0
+
+# DATA_TIME_PEAK_MIN_RELIEF: skip per-timestamp boosting when the timestamp has weak anomaly contrast.
+DATA_TIME_PEAK_MIN_RELIEF = 0.15
+
+# EVENT_TIME_WEIGHT: extra weight for timestamps identified as anomaly periods.
+EVENT_TIME_WEIGHT = 3.0
+
+# EVENT_PEAK_WEIGHT: extra weight for samples that are locally high inside anomaly timestamps.
+EVENT_PEAK_WEIGHT = 3.0
+
+# EVENT_PEAK_RATIO: inside anomaly timestamps, stations above this fraction of the timestamp max get extra boost.
+EVENT_PEAK_RATIO = 0.6
+
 # DATA_WARMUP_EPOCHS: train with data-dominant objective in early epochs.
 DATA_WARMUP_EPOCHS = 300
 
@@ -180,6 +213,27 @@ DATA_WARMUP_PDE_FACTOR = 0.2
 
 # PDE_RAMP_EPOCHS: epochs to smoothly increase PDE contribution from warmup factor to full weight.
 PDE_RAMP_EPOCHS = 1000
+
+# STAGE1_EPOCHS: first training stage focuses on fitting high-value observations before full physics is restored.
+STAGE1_EPOCHS = 1500
+
+# STAGE1_PDE_FACTOR: PDE multiplier used during stage 1.
+STAGE1_PDE_FACTOR = 0.1
+
+# STAGE1_DATA_MULT: additional multiplier on the data term during stage 1.
+STAGE1_DATA_MULT = 3.0
+
+# STAGE1_TOP_STATION_MULT: additional multiplier on top-station ranking loss during stage 1.
+STAGE1_TOP_STATION_MULT = 2.0
+
+# STAGE1_MULTI_HIGH_MULT: additional multiplier on multi-high-station fitting loss during stage 1.
+STAGE1_MULTI_HIGH_MULT = 3.0
+
+# STAGE1_HIGH_DOWNWIND_MULT: stage-1 multiplier for downwind consistency loss.
+STAGE1_HIGH_DOWNWIND_MULT = 0.5
+
+# STAGE1_SOURCE_LOCAL_MULT: stage-1 multiplier for source-local dominance loss.
+STAGE1_SOURCE_LOCAL_MULT = 0.0
 
 # MAX_GRAD_NORM: gradient clipping threshold for training stability (None or <=0 disables).
 MAX_GRAD_NORM = 10.0
