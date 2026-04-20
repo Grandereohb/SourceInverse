@@ -1,0 +1,24 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Excel temporary lock files
+~$*.xlsx
+~$*.xls
+~$*.xlsm
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+
+# Local tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
