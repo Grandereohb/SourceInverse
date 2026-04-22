@@ -8,6 +8,10 @@ import openpyxl
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference
 
+JING_JIN_JI_PROVINCES = {"北京市", "天津市", "河北省"}
+FURNITURE_KEYWORDS = ("家具制造",)
+CASTING_KEYWORDS = ("铸造",)
+
 
 def normalize_text(value: object) -> str:
     if value is None:
@@ -64,15 +68,100 @@ def write_xlsx(path: Path, sheet_name: str, headers: Iterable[str], rows: Iterab
     wb.save(path)
 
 
+def contains_keywords(text: str, keywords: Iterable[str]) -> bool:
+    return any(keyword in text for keyword in keywords)
+
+
+def build_bar_chart(
+    ws,
+    title: str,
+    y_title: str,
+    x_title: str,
+    data_col: int,
+    header_row: int,
+    category_col: int,
+    start_row: int,
+    end_row: int,
+    anchor: str,
+    width: float = 12,
+    height: float = 7,
+) -> None:
+    chart = BarChart()
+    chart.type = "col"
+    chart.title = title
+    chart.y_axis.title = y_title
+    chart.x_axis.title = x_title
+    chart.y_axis.delete = False
+    chart.x_axis.delete = False
+
+    values = []
+    for row in range(start_row, end_row + 1):
+        value = ws.cell(row, data_col).value
+        if isinstance(value, (int, float)):
+            values.append(value)
+
+    max_value = max(values, default=1)
+    chart.y_axis.scaling.min = 0
+    chart.y_axis.scaling.max = max(1, max_value + max(1, math.ceil(max_value * 0.1)))
+    chart.y_axis.majorUnit = max(1, math.ceil(max_value / 5))
+
+    data = Reference(ws, min_col=data_col, min_row=header_row, max_row=end_row)
+    categories = Reference(ws, min_col=category_col, min_row=start_row, max_row=end_row)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(categories)
+    chart.width = width
+    chart.height = height
+    ws.add_chart(chart, anchor)
+
+
 def write_city_county_summary_with_charts(
     path: Path,
     headers: Iterable[str],
     rows: Iterable[Iterable[object]],
-    top5_cities: Iterable[Tuple[str, int]],
-    top5_industries: Iterable[Tuple[str, int]],
+    top10_cities: Iterable[Tuple[str, int]],
+    top10_industries: Iterable[Tuple[str, int]],
+    problem_rows: Iterable[Iterable[object]],
 ) -> None:
-    top5_cities = list(top5_cities)
-    top5_industries = list(top5_industries)
+    top10_cities = list(top10_cities)
+    top10_industries = list(top10_industries)
+    problem_rows = [list(row) for row in problem_rows]
+
+    jjj_rows = [row for row in problem_rows if row[0] in JING_JIN_JI_PROVINCES]
+    furniture_rows = [row for row in problem_rows if contains_keywords(row[4], FURNITURE_KEYWORDS)]
+    casting_rows = [row for row in problem_rows if contains_keywords(row[4], CASTING_KEYWORDS)]
+
+    jjj_city_units: Dict[str, Set[str]] = defaultdict(set)
+    furniture_city_units: Dict[str, Set[str]] = defaultdict(set)
+    furniture_county_units: Dict[str, Set[str]] = defaultdict(set)
+    for row in jjj_rows:
+        if row[1] and row[3]:
+            jjj_city_units[row[1]].add(row[3])
+    for row in furniture_rows:
+        if row[1] and row[3]:
+            furniture_city_units[row[1]].add(row[3])
+        if row[1] and row[2] and row[3]:
+            furniture_county_units[f"{row[1]}-{row[2]}"].add(row[3])
+
+    jjj_industry_counter = Counter(row[4] for row in jjj_rows if row[4])
+
+    jjj_city_top10 = sorted(
+        [(city, len(units)) for city, units in jjj_city_units.items()],
+        key=lambda item: (-item[1], item[0]),
+    )[:10]
+    furniture_city_top10 = sorted(
+        [(city, len(units)) for city, units in furniture_city_units.items()],
+        key=lambda item: (-item[1], item[0]),
+    )[:10]
+    furniture_county_top10 = sorted(
+        [(county, len(units)) for county, units in furniture_county_units.items()],
+        key=lambda item: (-item[1], item[0]),
+    )[:10]
+    jjj_industry_top10 = jjj_industry_counter.most_common(10)
+
+    overall_company_count = len({row[3] for row in problem_rows if row[3]})
+    jjj_company_count = len({row[3] for row in jjj_rows if row[3]})
+    furniture_company_count = len({row[3] for row in furniture_rows if row[3]})
+    casting_company_count = len({row[3] for row in casting_rows if row[3]})
 
     wb = Workbook()
     ws = wb.active
@@ -81,58 +170,129 @@ def write_city_county_summary_with_charts(
     for row in rows:
         ws.append(list(row))
 
+    focus_ws = wb.create_sheet("研究聚焦")
+    focus_ws.append(["维度", "指标", "数值", "说明"])
+    focus_summary_rows = [
+        ["总体", "问题记录数", len(problem_rows), "标色问题行业记录总量"],
+        ["总体", "问题企业数", overall_company_count, "按单位名称去重"],
+        ["总体", "Top10城市", "已扩展", "按问题行业数量排序"],
+        ["总体", "Top10行业", "已扩展", "按出现频次排序"],
+        ["京津冀", "问题记录数", len(jjj_rows), "北京市、天津市、河北省"],
+        ["京津冀", "问题企业数", jjj_company_count, "按单位名称去重"],
+        ["京津冀", "涉及城市数", len({row[1] for row in jjj_rows if row[1]}), "问题记录覆盖城市"],
+        ["京津冀", "涉及行业数", len({row[4] for row in jjj_rows if row[4]}), "问题行业类型"],
+        ["家具制造", "问题记录数", len(furniture_rows), "问题行业含“家具制造”"],
+        ["家具制造", "问题企业数", furniture_company_count, "按单位名称去重"],
+        ["家具制造", "涉及城市数", len({row[1] for row in furniture_rows if row[1]}), "问题记录覆盖城市"],
+        ["家具制造", "涉及区县数", len({(row[1], row[2]) for row in furniture_rows if row[1] and row[2]}), "问题记录覆盖区县"],
+        ["铸造行业", "问题记录数", len(casting_rows), "问题行业含“铸造”"],
+        ["铸造行业", "问题企业数", casting_company_count, "当前问题行业结果中未识别到铸造则为0"],
+        ["铸造行业", "结论", "未识别到问题记录" if not casting_rows else "已识别到问题记录", "基于当前标色问题行业字段统计"],
+    ]
+    for row in focus_summary_rows:
+        focus_ws.append(row)
+
     chart_ws = wb.create_sheet("图表")
-    chart_ws.append(["Top5问题城市", "异常行业数量"])
+    chart_ws.append(["Top10问题城市", "异常行业数量"])
     city_start_row = 2
-    for city, count in top5_cities:
+    for city, count in top10_cities:
         chart_ws.append([city, count])
 
-    industry_title_row = city_start_row + 7
-    chart_ws.cell(row=industry_title_row, column=1, value="Top5问题行业")
+    industry_title_row = city_start_row + 12
+    chart_ws.cell(row=industry_title_row, column=1, value="Top10问题行业")
     chart_ws.cell(row=industry_title_row, column=2, value="出现频次")
     industry_start_row = industry_title_row + 1
-    for industry, count in top5_industries:
+    for industry, count in top10_industries:
         chart_ws.append([industry, count])
 
-    city_end_row = city_start_row + 4
-    city_chart = BarChart()
-    city_chart.type = "col"
-    city_chart.title = "Top5问题城市（异常行业数量）"
-    city_chart.y_axis.title = "异常行业数量"
-    city_chart.x_axis.title = "城市"
-    city_chart.y_axis.delete = False
-    city_chart.x_axis.delete = False
-    city_max = max([count for _, count in top5_cities], default=1)
-    city_chart.y_axis.scaling.min = 0
-    city_chart.y_axis.scaling.max = max(1, city_max + 1)
-    city_chart.y_axis.majorUnit = max(1, math.ceil(city_max / 5))
-    city_data = Reference(chart_ws, min_col=2, min_row=1, max_row=city_end_row)
-    city_cats = Reference(chart_ws, min_col=1, min_row=city_start_row, max_row=city_end_row)
-    city_chart.add_data(city_data, titles_from_data=True)
-    city_chart.set_categories(city_cats)
-    city_chart.height = 7
-    city_chart.width = 12
-    chart_ws.add_chart(city_chart, "D2")
+    jjj_city_title_row = 1
+    chart_ws.cell(row=jjj_city_title_row, column=10, value="京津冀问题城市Top10")
+    chart_ws.cell(row=jjj_city_title_row, column=11, value="问题企业数")
+    jjj_city_start_row = jjj_city_title_row + 1
+    for offset, (city, count) in enumerate(jjj_city_top10):
+        row_idx = jjj_city_start_row + offset
+        chart_ws.cell(row=row_idx, column=10, value=city)
+        chart_ws.cell(row=row_idx, column=11, value=count)
 
-    industry_end_row = industry_start_row + 4
-    industry_chart = BarChart()
-    industry_chart.type = "col"
-    industry_chart.title = "Top5问题行业（出现频次）"
-    industry_chart.y_axis.title = "出现频次"
-    industry_chart.x_axis.title = "行业"
-    industry_chart.y_axis.delete = False
-    industry_chart.x_axis.delete = False
-    industry_max = max([count for _, count in top5_industries], default=1)
-    industry_chart.y_axis.scaling.min = 0
-    industry_chart.y_axis.scaling.max = max(1, industry_max + math.ceil(industry_max * 0.1))
-    industry_chart.y_axis.majorUnit = max(1, math.ceil(industry_max / 5))
-    industry_data = Reference(chart_ws, min_col=2, min_row=industry_title_row, max_row=industry_end_row)
-    industry_cats = Reference(chart_ws, min_col=1, min_row=industry_start_row, max_row=industry_end_row)
-    industry_chart.add_data(industry_data, titles_from_data=True)
-    industry_chart.set_categories(industry_cats)
-    industry_chart.height = 7
-    industry_chart.width = 12
-    chart_ws.add_chart(industry_chart, "D20")
+    furniture_city_title_row = industry_title_row
+    chart_ws.cell(row=furniture_city_title_row, column=10, value="家具制造城市Top10")
+    chart_ws.cell(row=furniture_city_title_row, column=11, value="问题企业数")
+    furniture_city_start_row = furniture_city_title_row + 1
+    for offset, (city, count) in enumerate(furniture_city_top10):
+        row_idx = furniture_city_start_row + offset
+        chart_ws.cell(row=row_idx, column=10, value=city)
+        chart_ws.cell(row=row_idx, column=11, value=count)
+
+    furniture_county_title_row = industry_title_row + 12
+    chart_ws.cell(row=furniture_county_title_row, column=10, value="家具制造区县Top10")
+    chart_ws.cell(row=furniture_county_title_row, column=11, value="问题企业数")
+    furniture_county_start_row = furniture_county_title_row + 1
+    for offset, (county, count) in enumerate(furniture_county_top10):
+        row_idx = furniture_county_start_row + offset
+        chart_ws.cell(row=row_idx, column=10, value=county)
+        chart_ws.cell(row=row_idx, column=11, value=count)
+
+    compare_title_row = furniture_county_title_row + 12
+    chart_ws.cell(row=compare_title_row, column=10, value="研究聚焦对比")
+    chart_ws.cell(row=compare_title_row, column=11, value="记录数")
+    compare_start_row = compare_title_row + 1
+    compare_rows = [
+        ("全部问题记录", len(problem_rows)),
+        ("京津冀问题记录", len(jjj_rows)),
+        ("家具制造问题记录", len(furniture_rows)),
+        ("铸造问题记录", len(casting_rows)),
+    ]
+    for offset, (label, count) in enumerate(compare_rows):
+        row_idx = compare_start_row + offset
+        chart_ws.cell(row=row_idx, column=10, value=label)
+        chart_ws.cell(row=row_idx, column=11, value=count)
+
+    jjj_industry_title_row = compare_title_row
+    chart_ws.cell(row=jjj_industry_title_row, column=18, value="京津冀问题行业Top10")
+    chart_ws.cell(row=jjj_industry_title_row, column=19, value="出现频次")
+    jjj_industry_start_row = jjj_industry_title_row + 1
+    for offset, (industry, count) in enumerate(jjj_industry_top10):
+        row_idx = jjj_industry_start_row + offset
+        chart_ws.cell(row=row_idx, column=18, value=industry)
+        chart_ws.cell(row=row_idx, column=19, value=count)
+
+    city_end_row = city_start_row + max(len(top10_cities), 1) - 1
+    industry_end_row = industry_start_row + max(len(top10_industries), 1) - 1
+    jjj_city_end_row = jjj_city_start_row + max(len(jjj_city_top10), 1) - 1
+    furniture_city_end_row = furniture_city_start_row + max(len(furniture_city_top10), 1) - 1
+    furniture_county_end_row = furniture_county_start_row + max(len(furniture_county_top10), 1) - 1
+    compare_end_row = compare_start_row + len(compare_rows) - 1
+    jjj_industry_end_row = jjj_industry_start_row + max(len(jjj_industry_top10), 1) - 1
+
+    build_bar_chart(
+        chart_ws, "Top10问题城市（异常行业数量）", "异常行业数量", "城市",
+        2, 1, 1, city_start_row, city_end_row, "D2", width=13, height=7
+    )
+    build_bar_chart(
+        chart_ws, "Top10问题行业（出现频次）", "出现频次", "行业",
+        2, industry_title_row, 1, industry_start_row, industry_end_row, "D22", width=13, height=7
+    )
+    build_bar_chart(
+        chart_ws, "京津冀问题城市Top10（问题企业数）", "问题企业数", "城市",
+        11, jjj_city_title_row, 10, jjj_city_start_row, jjj_city_end_row, "M2", width=13, height=7
+    )
+    build_bar_chart(
+        chart_ws, "家具制造城市Top10（问题企业数）", "问题企业数", "城市",
+        11, furniture_city_title_row, 10, furniture_city_start_row, furniture_city_end_row, "M22", width=13, height=7
+    )
+    build_bar_chart(
+        chart_ws, "家具制造区县Top10（问题企业数）", "问题企业数", "区县",
+        11, furniture_county_title_row, 10, furniture_county_start_row, furniture_county_end_row, "M42", width=13, height=7
+    )
+    build_bar_chart(
+        chart_ws, "研究聚焦对比", "记录数", "维度",
+        11, compare_title_row, 10, compare_start_row, compare_end_row, "V2", width=11, height=7
+    )
+    if jjj_industry_top10:
+        build_bar_chart(
+            chart_ws, "京津冀问题行业Top10（出现频次）", "出现频次", "行业",
+            19, jjj_industry_title_row, 18, jjj_industry_start_row, jjj_industry_end_row, "V22", width=11, height=7
+        )
 
     wb.save(path)
 
@@ -241,19 +401,20 @@ def main() -> None:
             ]
         )
 
-    top5_cities = sorted(
+    top10_cities = sorted(
         [(city, len(stats["industries"])) for (_, city), stats in by_city.items()],
         key=lambda x: (-x[1], x[0]),
-    )[:5]
-    top5_industries = industry_frequency.most_common(5)
+    )[:10]
+    top10_industries = industry_frequency.most_common(10)
 
     city_county_path = output_dir / "city_county_summary.xlsx"
     write_city_county_summary_with_charts(
         city_county_path,
         ["省份", "地市", "区县", "问题行业列表", "问题行业数量", "问题企业数量"],
         city_county_rows,
-        top5_cities,
-        top5_industries,
+        top10_cities,
+        top10_industries,
+        problem_rows,
     )
 
     city_rows = []
