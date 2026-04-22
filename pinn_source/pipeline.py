@@ -398,10 +398,20 @@ def run(site_path, conc_path, wind_path):
     t_w_t = torch.tensor(t_w, dtype=torch.float32, device=device).view(-1)
     u_w_t = torch.tensor(u_w, dtype=torch.float32, device=device).view(-1)
     v_w_t = torch.tensor(v_w, dtype=torch.float32, device=device).view(-1)
+    obs_station_labels_arr = np.array(obs_station_labels, dtype=object)
     obs_time_indices = [
         torch.tensor(np.where(np.isclose(t_obs, tw))[0], dtype=torch.long, device=device)
         for tw in t_w
     ]
+    station_time_indices = []
+    for st in valid_stations:
+        idx_s = np.flatnonzero(obs_station_labels_arr == st)
+        if idx_s.size == 0:
+            continue
+        idx_s = idx_s[np.argsort(t_obs[idx_s])]
+        station_time_indices.append(
+            torch.tensor(idx_s, dtype=torch.long, device=device)
+        )
 
     rng = np.random.default_rng(0)
 
@@ -480,6 +490,13 @@ def run(site_path, conc_path, wind_path):
             f"min={flat.min().item():.4f}, max={flat.max().item():.4f}]"
         )
 
+    def safe_scalar(value):
+        if value is None:
+            return 0.0
+        if isinstance(value, torch.Tensor):
+            return float(value.detach().item())
+        return float(value)
+
     for epoch in range(1, EPOCHS + 1):
         sync_device()
         epoch_start_time = time.perf_counter()
@@ -524,6 +541,9 @@ def run(site_path, conc_path, wind_path):
         data_residual = c_pred - c_obs_t
         loss_data = torch.mean(data_weight_t * (data_residual**2))
         aux_should_update = (epoch - 1) % aux_loss_update_every == 0
+        multi_high_shape_loss_dbg = None
+        multi_high_sep_loss_dbg = None
+        multi_high_time_loss_dbg = None
         if LOSS_W_TOP_STATION > 0 and aux_should_update:
             top_station_losses = []
             for idx_t in obs_time_indices:
@@ -550,6 +570,8 @@ def run(site_path, conc_path, wind_path):
 
         if LOSS_W_MULTI_HIGH > 0 and aux_should_update:
             multi_high_losses = []
+            multi_high_shape_terms = []
+            multi_high_sep_terms = []
             for idx_t in obs_time_indices:
                 if idx_t.numel() == 0:
                     continue
@@ -582,12 +604,52 @@ def run(site_path, conc_path, wind_path):
                 else:
                     sep_loss = torch.tensor(0.0, device=device)
 
+                multi_high_shape_terms.append(shape_loss.detach())
+                multi_high_sep_terms.append(sep_loss.detach())
                 multi_high_losses.append(shape_loss + sep_loss)
 
-            if multi_high_losses:
-                loss_multi_high = torch.mean(torch.stack(multi_high_losses))
+            time_multi_losses = []
+            for idx_s in station_time_indices:
+                if idx_s.numel() < 2:
+                    continue
+
+                obs_seq = c_obs_flat[idx_s]
+                pred_seq = c_pred_flat[idx_s]
+                obs_station_max = torch.max(obs_seq).detach()
+                obs_station_min = torch.min(obs_seq).detach()
+                station_relief = (obs_station_max - obs_station_min) / torch.clamp(
+                    torch.abs(obs_station_max), min=1e-6
+                )
+                if float(station_relief.item()) < MULTI_HIGH_MIN_RELIEF:
+                    continue
+
+                active_cut = MULTI_HIGH_RATIO * obs_station_max
+                pair_active = torch.maximum(obs_seq[1:], obs_seq[:-1]) >= active_cut
+                if not torch.any(pair_active):
+                    continue
+
+                obs_scale = torch.clamp(obs_station_max, min=1e-6)
+                delta_obs = (obs_seq[1:] - obs_seq[:-1]) / obs_scale
+                delta_pred = (pred_seq[1:] - pred_seq[:-1]) / obs_scale
+                time_multi_losses.append(
+                    torch.mean((delta_pred[pair_active] - delta_obs[pair_active]) ** 2)
+                )
+
+            if multi_high_losses or time_multi_losses:
+                loss_terms = []
+                if multi_high_losses:
+                    loss_terms.append(torch.mean(torch.stack(multi_high_losses)))
+                if time_multi_losses:
+                    loss_terms.append(torch.mean(torch.stack(time_multi_losses)))
+                loss_multi_high = torch.mean(torch.stack(loss_terms))
             else:
                 loss_multi_high = torch.tensor(0.0, device=device)
+            if multi_high_shape_terms:
+                multi_high_shape_loss_dbg = torch.mean(torch.stack(multi_high_shape_terms))
+            if multi_high_sep_terms:
+                multi_high_sep_loss_dbg = torch.mean(torch.stack(multi_high_sep_terms))
+            if time_multi_losses:
+                multi_high_time_loss_dbg = torch.mean(torch.stack(time_multi_losses))
             multi_high_loss_cache = loss_multi_high.detach()
         elif LOSS_W_MULTI_HIGH > 0:
             loss_multi_high = multi_high_loss_cache
@@ -988,6 +1050,70 @@ def run(site_path, conc_path, wind_path):
                 pred_raw = c_pred * c_scale + c_obs_baseline_t
             else:
                 pred_raw = c_pred * c_scale
+            pred_raw_flat = pred_raw.detach().view(-1)
+            obs_raw_flat = c_obs_raw_t.detach().view(-1)
+            baseline_flat = c_obs_baseline_t.detach().view(-1)
+            obs_fit_flat = c_obs_t.detach().view(-1)
+            gate_flat = gate_obs.detach().view(-1)
+
+            peak_hit_values = []
+            peak_obs_values = []
+            peak_pred_values = []
+            peak_gate_values = []
+            peak_q_values = []
+            peak_plume_values = []
+            multi_station_counts = []
+            for idx_t in obs_time_indices:
+                if idx_t.numel() == 0:
+                    continue
+                obs_slice_fit = obs_fit_flat[idx_t]
+                pred_slice_raw = pred_raw_flat[idx_t]
+                obs_slice_raw = obs_raw_flat[idx_t]
+                gate_slice = gate_flat[idx_t]
+                q_slice = q_obs.detach().view(-1)[idx_t]
+                plume_slice = plume_obs.detach().view(-1)[idx_t]
+
+                top_idx = int(torch.argmax(obs_slice_fit).item())
+                pred_top = pred_slice_raw[top_idx]
+                obs_top = obs_slice_raw[top_idx]
+                peak_hit_values.append(
+                    (pred_top / torch.clamp(obs_top, min=1e-6)).detach()
+                )
+                peak_obs_values.append(obs_top.detach())
+                peak_pred_values.append(pred_top.detach())
+                peak_gate_values.append(gate_slice[top_idx].detach())
+                peak_q_values.append(q_slice[top_idx].detach())
+                peak_plume_values.append(plume_slice[top_idx].detach())
+
+                obs_max_fit = torch.max(obs_slice_fit)
+                relief = (obs_max_fit - torch.min(obs_slice_fit)) / torch.clamp(
+                    torch.abs(obs_max_fit), min=1e-6
+                )
+                if float(relief.item()) >= MULTI_HIGH_MIN_RELIEF:
+                    high_mask = obs_slice_fit >= (MULTI_HIGH_RATIO * obs_max_fit)
+                    multi_station_counts.append(float(high_mask.sum().item()))
+
+            if peak_hit_values:
+                peak_hit_mean = torch.mean(torch.stack(peak_hit_values)).item()
+                peak_obs_mean = torch.mean(torch.stack(peak_obs_values)).item()
+                peak_pred_mean = torch.mean(torch.stack(peak_pred_values)).item()
+                peak_gate_mean = torch.mean(torch.stack(peak_gate_values)).item()
+                peak_q_mean_dbg = torch.mean(torch.stack(peak_q_values)).item()
+                peak_plume_mean = torch.mean(torch.stack(peak_plume_values)).item()
+            else:
+                peak_hit_mean = 0.0
+                peak_obs_mean = 0.0
+                peak_pred_mean = 0.0
+                peak_gate_mean = 0.0
+                peak_q_mean_dbg = 0.0
+                peak_plume_mean = 0.0
+
+            if multi_station_counts:
+                multi_station_count_mean = float(np.mean(multi_station_counts))
+                multi_station_count_max = float(np.max(multi_station_counts))
+            else:
+                multi_station_count_mean = 0.0
+                multi_station_count_max = 0.0
             print(
                 "Debug: "
                 + ", ".join(
@@ -1003,6 +1129,21 @@ def run(site_path, conc_path, wind_path):
                         f"bg_abs_mean={torch.mean(torch.abs(bg_obs)).item():.4f}",
                         f"source_abs_mean={torch.mean(torch.abs(source_obs)).item():.4f}",
                         f"pde_abs_mean={residual_abs_mean.item():.4f}",
+                        f"baseline_mean={baseline_flat.mean().item():.4f}",
+                        f"obs_fit_mean={obs_fit_flat.mean().item():.4f}",
+                        f"pred_raw_mean={pred_raw_flat.mean().item():.4f}",
+                        f"pred_raw_max={pred_raw_flat.max().item():.4f}",
+                        f"peak_hit_mean={peak_hit_mean:.4f}",
+                        f"peak_obs_mean={peak_obs_mean:.4f}",
+                        f"peak_pred_mean={peak_pred_mean:.4f}",
+                        f"peak_gate_mean={peak_gate_mean:.4f}",
+                        f"peak_q_obs_mean={peak_q_mean_dbg:.4f}",
+                        f"peak_plume_mean={peak_plume_mean:.4f}",
+                        f"multi_high_shape_dbg={safe_scalar(multi_high_shape_loss_dbg):.4f}",
+                        f"multi_high_sep_dbg={safe_scalar(multi_high_sep_loss_dbg):.4f}",
+                        f"multi_high_time_dbg={safe_scalar(multi_high_time_loss_dbg):.4f}",
+                        f"multi_station_count_mean={multi_station_count_mean:.2f}",
+                        f"multi_station_count_max={multi_station_count_max:.2f}",
                         f"D={D.item():.4e}",
                         f"D_parallel={D_parallel.mean().item():.4e}",
                         f"D_perp={D_perp.mean().item():.4e}",
