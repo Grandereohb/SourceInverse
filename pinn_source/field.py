@@ -9,6 +9,8 @@ from config import (
     GATE_STEEPNESS_MIN,
     GATE_DECAY_SCALE,
     GATE_DECAY_MIN,
+    GATE_FLOOR,
+    GATE_DOWNWIND_BROADEN,
 )
 
 
@@ -18,7 +20,7 @@ def _match_column(tensor):
     return tensor
 
 
-def source_gate(xyt, u, v, model, sigma_src):
+def source_aligned_coords(xyt, u, v, model):
     u = _match_column(u)
     v = _match_column(v)
 
@@ -31,25 +33,37 @@ def source_gate(xyt, u, v, model, sigma_src):
 
     along = dx * ex + dy * ey
     cross = -dx * ey + dy * ex
+    return along, cross, dx, dy
+
+
+def source_gate(xyt, u, v, model, sigma_src):
+    along, cross, dx, dy = source_aligned_coords(xyt, u, v, model)
 
     sigma_core = max(float(sigma_src), 1e-4)
     sigma_core_gate = max(GATE_CORE_SCALE * sigma_core, 1e-4)
     sigma_cross = max(GATE_CROSS_SCALE * sigma_core, GATE_CROSS_MIN)
     gate_steepness = max(GATE_STEEPNESS_SCALE * sigma_core, GATE_STEEPNESS_MIN)
     decay_length = max(GATE_DECAY_SCALE * sigma_core, GATE_DECAY_MIN)
+    downwind_broaden = max(float(GATE_DOWNWIND_BROADEN), 1.0)
+    gate_floor = min(max(float(GATE_FLOOR), 0.0), 0.95)
 
     source_core = torch.exp(-(dx**2 + dy**2) / (2.0 * sigma_core_gate**2))
+    downwind_weight = torch.sigmoid(along / gate_steepness) ** 2
+    sigma_cross_eff = sigma_cross * (1.0 + (downwind_broaden - 1.0) * downwind_weight)
     plume_tail = (
-        torch.sigmoid(along / gate_steepness)
-        * torch.exp(-(cross**2) / (2.0 * sigma_cross**2))
+        downwind_weight
+        * torch.exp(-(cross**2) / (2.0 * sigma_cross_eff**2))
         * torch.exp(-torch.relu(along) / decay_length)
     )
-    return torch.clamp(source_core + plume_tail, min=0.0)
+    gate_raw = torch.clamp(source_core + plume_tail, min=0.0)
+    return gate_floor + (1.0 - gate_floor) * gate_raw
 
 
 def field_components(model, xyt, u, v, sigma_src):
     bg = model.background(xyt[:, 2:3])
-    plume = model.plume_strength(xyt)
+    along, cross, _, _ = source_aligned_coords(xyt, u, v, model)
+    plume_features = torch.cat([torch.relu(along), cross, xyt[:, 2:3]], dim=1)
+    plume = model.plume_strength(plume_features)
     source_bias = model.source_bias()
     gate = source_gate(xyt, u, v, model, sigma_src)
     t = xyt[:, 2:3]

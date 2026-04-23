@@ -1,4 +1,5 @@
 import math
+import os
 import time
 import numpy as np
 import torch
@@ -10,11 +11,17 @@ from config import (
     DOMAIN_PAD_M,
     WIND_DIR_IS_FROM,
     MODEL_NAME,
+    DEVICE,
     SIGMA_SRC,
     LOSS_W_DATA,
     LOSS_W_PDE,
     LOSS_W_AXIS,
     ENABLE_LOSS_AXIS,
+    AXIS_MIN_RELIEF,
+    AXIS_HIGH_RATIO,
+    AXIS_ALONG_MARGIN,
+    AXIS_CROSS_BASE,
+    AXIS_CROSS_SLOPE,
     LOSS_W_SOURCE_LOCAL,
     ENABLE_LOSS_SOURCE_LOCAL,
     SOURCE_LOCAL_MARGIN,
@@ -249,8 +256,14 @@ def run(site_path, conc_path, wind_path):
     y_min, y_max = (y_min_p - y0) / L, (y_max_p - y0) / L
     t_min, t_max = (t_min_p - t0_p) / T, (t_max_p - t0_p) / T
     # Build tensors
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    device_pref = str(os.environ.get("PINN_DEVICE", DEVICE)).strip().lower()
+    if device_pref == "cpu":
+        device = torch.device("cpu")
+    elif device_pref == "cuda":
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device} (preference={device_pref})")
     if device.type == "cuda":
         print(f"CUDA device: {torch.cuda.get_device_name(device)}")
 
@@ -830,44 +843,34 @@ def run(site_path, conc_path, wind_path):
         sync_device()
         timing_source_local += time.perf_counter() - t_section
 
-        # 2) Plume-axis geometric constraint (time-sliced, observation points):
-        # compute every N epochs and reuse cached scalar in between for speed.
+        # 2) Wind-propagation corridor constraint (time-sliced, observation peaks):
+        # observed high-value stations should lie in a reasonable downwind corridor
+        # from the inferred source instead of only matching a predicted centroid.
         sync_device()
         t_section = time.perf_counter()
         if ENABLE_LOSS_AXIS and LOSS_W_AXIS > 0 and (epoch - 1) % axis_update_every == 0:
             axis_losses = []
-            axis_min_rel_contrast = 0.05
 
             for i, idx_t in enumerate(obs_time_indices):
                 if idx_t.numel() == 0:
                     continue
 
-                c_slice = c_pred_flat[idx_t]
+                obs_slice = c_obs_flat[idx_t]
                 x_slice = x_obs_flat[idx_t]
                 y_slice = y_obs_flat[idx_t]
 
-                # Skip axis loss when station concentrations are too similar.
-                c_max = torch.max(c_slice).detach()
-                c_min = torch.min(c_slice).detach()
-                rel_contrast = (c_max - c_min) / torch.clamp(torch.abs(c_max), min=1e-6)
-                if float(rel_contrast.item()) < axis_min_rel_contrast:
+                obs_max = torch.max(obs_slice).detach()
+                obs_min = torch.min(obs_slice).detach()
+                rel_contrast = (obs_max - obs_min) / torch.clamp(
+                    torch.abs(obs_max), min=1e-6
+                )
+                if float(rel_contrast.item()) < AXIS_MIN_RELIEF:
                     continue
 
-                q90 = torch.quantile(c_slice.detach(), 0.9)
-                high_mask = c_slice >= q90
-
-                # If only one high-concentration point is selected, include the second-largest point.
-                if int(high_mask.sum().item()) == 1 and idx_t.numel() >= 2:
-                    top2 = torch.topk(c_slice.detach(), k=2).indices
-                    high_mask[top2[1]] = True
-
-                w_c = torch.relu(c_slice[high_mask]) + 1e-8
-                w_sum = torch.sum(w_c).clamp_min(1e-8)
-                x_h = torch.sum(w_c * x_slice[high_mask]) / w_sum
-                y_h = torch.sum(w_c * y_slice[high_mask]) / w_sum
-
-                d_x = x_h - xs
-                d_y = y_h - ys
+                high_cut = AXIS_HIGH_RATIO * obs_max
+                high_mask = obs_slice >= high_cut
+                if not torch.any(high_mask):
+                    continue
 
                 u_i = u_w_t[i]
                 v_i = v_w_t[i]
@@ -875,9 +878,22 @@ def run(site_path, conc_path, wind_path):
                 w_x = u_i / w_norm
                 w_y = v_i / w_norm
 
-                dot = d_x * w_x + d_y * w_y
-                margin = 0.03 * w_norm
-                axis_losses.append(torch.relu(margin - dot))
+                dx_high = x_slice[high_mask] - xs
+                dy_high = y_slice[high_mask] - ys
+                along_high = dx_high * w_x + dy_high * w_y
+                cross_high = torch.abs(-dx_high * w_y + dy_high * w_x)
+
+                high_weight = torch.relu(obs_slice[high_mask]) / torch.clamp(
+                    obs_max, min=1e-6
+                )
+                corridor_half_width = AXIS_CROSS_BASE + AXIS_CROSS_SLOPE * torch.relu(
+                    along_high
+                )
+                forward_penalty = torch.relu(AXIS_ALONG_MARGIN - along_high)
+                cross_penalty = torch.relu(cross_high - corridor_half_width)
+                axis_losses.append(
+                    torch.mean(high_weight * (forward_penalty + cross_penalty))
+                )
 
             if len(axis_losses) > 0:
                 loss_axis = torch.mean(torch.stack(axis_losses))

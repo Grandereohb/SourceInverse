@@ -13,6 +13,12 @@ WIND_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh_js\wind.xlsx
 # MODEL_NAME: model key used by model registry.
 MODEL_NAME = "pinn"
 
+# DEVICE:
+# "auto" -> use CUDA when available, otherwise CPU
+# "cpu"  -> force CPU and avoid CUDA probing
+# "cuda" -> force CUDA
+DEVICE = "auto"
+
 # FIELD_MODE:
 # "default"       -> bg(t) + gate * (source_bias + plume_strength) * Q(t)
 # "no_gate"       -> bg(t) + plume_strength * Q(t)
@@ -69,6 +75,8 @@ GATE_STEEPNESS_SCALE = 1.5
 GATE_STEEPNESS_MIN = 0.04
 GATE_DECAY_SCALE = 6.0
 GATE_DECAY_MIN = 0.18
+GATE_FLOOR = 0.0
+GATE_DOWNWIND_BROADEN = 1.0
 
 # D_MIN_PHYS: lower bound of physical diffusion coefficient before normalization.
 D_MIN_PHYS = 500.0
@@ -107,6 +115,11 @@ COLLOC_PLUME_LENGTH = 1.0
 # LOSS_W_AXIS: weight for plume-axis wind-alignment constraint.
 LOSS_W_AXIS = 1.0
 ENABLE_LOSS_AXIS = True
+AXIS_MIN_RELIEF = 0.15
+AXIS_HIGH_RATIO = 0.6
+AXIS_ALONG_MARGIN = 0.03
+AXIS_CROSS_BASE = 0.05
+AXIS_CROSS_SLOPE = 0.35
 
 # LOSS_W_SOURCE_LOCAL: weight for keeping source-neighborhood concentration above far field.
 LOSS_W_SOURCE_LOCAL = 1.0
