@@ -1,6 +1,6 @@
 import sys
 
-from config import SITE_PATH, CONC_PATH, WIND_PATH
+from config import SITE_PATH, CONC_PATH, WIND_PATH, OUTPUT_DIR
 from pipeline import run
 
 
@@ -10,4 +10,4 @@ if __name__ == "__main__":
         sys.stderr.reconfigure(line_buffering=True)
     except AttributeError:
         pass
-    run(SITE_PATH, CONC_PATH, WIND_PATH)
+    run(SITE_PATH, CONC_PATH, WIND_PATH, output_dir=OUTPUT_DIR)

@@ -1,11 +1,9 @@
 # =========================
 # Data Paths
 # =========================
-SITE_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh_js\sites.xlsx"
-CONC_PATH = (
-    r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh_js\concentration.xlsx"
-)
-WIND_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh_js\wind.xlsx"
+SITE_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\jjj\sites.xlsx"
+CONC_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\jjj\concentration.xlsx"
+WIND_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\jjj\wind.xlsx"
 
 # =========================
 # Model Selection
@@ -24,12 +22,22 @@ DEVICE = "auto"
 # "no_gate"       -> bg(t) + plume_strength * Q(t)
 # "no_background" -> gate * (source_bias + plume_strength) * Q(t)
 # "minimal"       -> plume_strength * Q(t)
-FIELD_MODE = "no_background"
+# "analytic_plume" -> physically constrained downwind plume kernel * Q(t)
+FIELD_MODE = "analytic_plume"
 
 # PDE_SOURCE_MODE:
 # "gaussian" -> keep Gaussian source term in PDE residual
 # "none"     -> disable PDE source term for ablation
-PDE_SOURCE_MODE = "gaussian"
+PDE_SOURCE_MODE = "none"
+
+# =========================
+# Output
+# =========================
+# OUTPUT_DIR: directory used for CSV/JSON diagnostics and generated figures.
+OUTPUT_DIR = r"C:\Document\phd\SourceInverse\SourceInverse\result\source_uncertainty"
+
+# MAKE_PLOTS: show/save the original diagnostic plots for a single run.
+MAKE_PLOTS = True
 
 # =========================
 # Wind Direction Convention
@@ -39,20 +47,33 @@ PDE_SOURCE_MODE = "gaussian"
 # False -> "to" convention (0=N means wind blows toward north)
 WIND_DIR_IS_FROM = True
 
+# Smooth wind vectors before training/visualization. This reduces frame-to-frame
+# plume jitter when low-speed wind directions jump sharply.
+ENABLE_WIND_VECTOR_SMOOTHING = True
+WIND_SMOOTH_WINDOW = 5
+WIND_SMOOTH_LOW_SPEED_MPS = 0.8
+
 # =========================
 # Training Basics
 # =========================
 # EPOCHS: number of optimization iterations.
-EPOCHS = 5000
+# Daily runs use a balanced default; increase to 5000 for final high-precision runs.
+EPOCHS = 3500
 
 # LR: learning rate for model optimizer (Adam).
 LR = 1e-3
 
 # N_COLLOCATION: number of PDE collocation points per cycle.
-N_COLLOCATION = 4000
+# PDE autograd dominates runtime, so this is the main speed/precision knob.
+N_COLLOCATION = 1500
 
 # DOMAIN_PAD_M: extra padding (meters) added around station bounding box.
 DOMAIN_PAD_M = 500.0
+
+# SOURCE_POSITION_PAD_M: source candidates are constrained to the station
+# bounding box plus this padding. This is a projected parameter bound, not an
+# added loss term.
+SOURCE_POSITION_PAD_M = -300.0
 
 # =========================
 # Core Loss Weights (Base)
@@ -78,6 +99,18 @@ GATE_DECAY_MIN = 0.18
 GATE_FLOOR = 0.0
 GATE_DOWNWIND_BROADEN = 1.0
 
+# Analytic plume transport memory used when FIELD_MODE="analytic_plume".
+# Ages are in normalized event-window time units; 0.25 means roughly one quarter
+# of the cropped training window.
+ANALYTIC_PLUME_LAG_STEPS = 3
+ANALYTIC_PLUME_MAX_AGE = 0.45
+ANALYTIC_PLUME_MIN_AGE = 0.05
+ANALYTIC_PLUME_AGE_DECAY = 0.18
+ANALYTIC_PLUME_ALONG_SPREAD = 0.04
+ANALYTIC_PLUME_CROSS_SPREAD = 0.15
+ANALYTIC_PLUME_TRANSPORT_SCALE = 12.0
+ANALYTIC_PLUME_SOURCE_CORE_WEIGHT = 0.0
+
 # D_MIN_PHYS: lower bound of physical diffusion coefficient before normalization.
 D_MIN_PHYS = 500.0
 
@@ -86,6 +119,36 @@ D_PERP_RATIO = 0.2
 
 # WIND_SCALE: multiplier for normalized wind velocity to tune advection strength.
 WIND_SCALE = 10.0
+
+# =========================
+# Source Strength Q(t)
+# =========================
+# Q_MODE:
+# "neural"      -> continuous Q(t) = exp(logQ + q_net(t))
+# "smooth_time" -> continuous piecewise-linear logQ(t) with one control point per timestamp
+# "piecewise"   -> event-window time steps are grouped and each segment has one logQ_k
+Q_MODE = "smooth_time"
+
+# Q_SEGMENT_LENGTH: number of unique event-window timestamps in one Q segment.
+Q_SEGMENT_LENGTH = 6
+
+# Smoothness and amplitude regularization for time-varying logQ.
+# For neural Q(t), these act on q_net over the observed time grid.
+Q_SMOOTH_WEIGHT = 0.03
+Q_L2_WEIGHT = 0.001
+
+# Optional clamp bounds for Q(t). Set to None to disable a bound.
+Q_MIN = 0.2
+Q_MAX = 5.0
+
+# PLUME_MAX: upper bound for the learned plume shape factor before multiplying
+# by gate and Q(t). This prevents the model from hiding unphysical plume spikes
+# behind very small Q values.
+PLUME_MAX = None
+
+# PLUME_RAW_SHIFT: larger values make the bounded plume start closer to zero
+# while preserving the upper bound PLUME_MAX.
+PLUME_RAW_SHIFT = 4.0
 
 # =========================
 # Residual Weighting / Collocation Sampling
@@ -228,22 +291,22 @@ DATA_WARMUP_PDE_FACTOR = 0.2
 PDE_RAMP_EPOCHS = 1000
 
 # STAGE1_EPOCHS: first training stage focuses on fitting high-value observations before full physics is restored.
-STAGE1_EPOCHS = 1500
+STAGE1_EPOCHS = 0
 
 # STAGE1_PDE_FACTOR: PDE multiplier used during stage 1.
-STAGE1_PDE_FACTOR = 0.1
+STAGE1_PDE_FACTOR = 1.0
 
 # STAGE1_DATA_MULT: additional multiplier on the data term during stage 1.
-STAGE1_DATA_MULT = 3.0
+STAGE1_DATA_MULT = 1.0
 
 # STAGE1_TOP_STATION_MULT: additional multiplier on top-station ranking loss during stage 1.
-STAGE1_TOP_STATION_MULT = 2.0
+STAGE1_TOP_STATION_MULT = 1.0
 
 # STAGE1_MULTI_HIGH_MULT: additional multiplier on multi-high-station fitting loss during stage 1.
-STAGE1_MULTI_HIGH_MULT = 3.0
+STAGE1_MULTI_HIGH_MULT = 1.0
 
 # STAGE1_HIGH_DOWNWIND_MULT: stage-1 multiplier for downwind consistency loss.
-STAGE1_HIGH_DOWNWIND_MULT = 0.5
+STAGE1_HIGH_DOWNWIND_MULT = 1.0
 
 # STAGE1_SOURCE_LOCAL_MULT: stage-1 multiplier for source-local dominance loss.
 STAGE1_SOURCE_LOCAL_MULT = 0.0
@@ -261,10 +324,10 @@ VISUALIZE_GATE_ONLY = False
 ADD_BASELINE_TO_VIZ = True
 
 # LOSS_W_TOP_STATION: enforce that the highest observed station at each timestamp remains the highest predicted one.
-LOSS_W_TOP_STATION = 1.0
+LOSS_W_TOP_STATION = 0.0
 
 # LOSS_W_MULTI_HIGH: enforce simultaneous fitting of multiple high-valued stations at the same timestamp.
-LOSS_W_MULTI_HIGH = 2.0
+LOSS_W_MULTI_HIGH = 0.0
 
 # MULTI_HIGH_RATIO: stations above this fraction of the timestamp maximum residual are treated as joint high-value points.
 MULTI_HIGH_RATIO = 0.5
@@ -287,12 +350,36 @@ HIGH_DOWNWIND_MIN_RELIEF = 0.15
 # HIGH_DOWNWIND_MARGIN: minimum normalized downwind projection expected for anomalous stations.
 HIGH_DOWNWIND_MARGIN = 0.03
 
+# Low wind protection: downwind/axis constraints are weaker when raw wind speed is unreliable.
+LOW_WIND_SPEED_THRESHOLD = 0.5
+DOWNWIND_LOSS_LOW_WIND_FACTOR = 0.2
+AXIS_LOSS_LOW_WIND_FACTOR = 0.2
+CORRIDOR_LOSS_LOW_WIND_FACTOR = 0.2
+
+# =========================
+# Fast Source Confidence Landscape
+# =========================
+# USE_SOURCE_LANDSCAPE_CONFIDENCE:
+# After one normal training run, scan fixed source locations and convert the
+# loss landscape into a fast pseudo-probability source region.
+USE_SOURCE_LANDSCAPE_CONFIDENCE = True
+SOURCE_LANDSCAPE_MODE = "local"  # "local" or "source_domain"
+SOURCE_LANDSCAPE_RADIUS_M = 450.0
+SOURCE_LANDSCAPE_STEP_M = 150.0
+SOURCE_LANDSCAPE_TEMPERATURE = 0.1
+SOURCE_LANDSCAPE_LEVELS = [0.5, 0.8, 0.95]
+SOURCE_LANDSCAPE_INCLUDE_GEOMETRY = False
+
+# Diffusion GIF resolution. These affect post-training generation time only.
+DIFFUSION_N_FRAMES = 24
+DIFFUSION_NX = 80
+DIFFUSION_NY = 80
 
 # EARLY_STOP_START: earliest epoch where convergence-based early stopping can trigger.
-EARLY_STOP_START = 2500
+EARLY_STOP_START = 1800
 
 # EARLY_STOP_PATIENCE: number of epochs with no meaningful improvement before stopping.
-EARLY_STOP_PATIENCE = 800
+EARLY_STOP_PATIENCE = 500
 
 # EARLY_STOP_MIN_DELTA: minimum raw_loss improvement counted as real progress.
 EARLY_STOP_MIN_DELTA = 1e-4

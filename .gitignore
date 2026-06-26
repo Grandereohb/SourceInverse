@@ -22,3 +22,8 @@ Thumbs.db
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Generated run outputs
+result/
+outputs/
+diffusion.gif

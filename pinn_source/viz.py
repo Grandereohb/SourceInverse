@@ -14,23 +14,270 @@ mpl.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "Noto Sans CJK S
 mpl.rcParams["axes.unicode_minus"] = False
 
 
-def plot_sites_and_source(sites_plot, pred_lon, pred_lat):
-    plt.figure(figsize=(6, 6))
-    plt.scatter(sites_plot["lon"], sites_plot["lat"], c="blue", s=80, label="Stations")
+def _median_grid_spacing(values):
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size <= 1:
+        return 1.0
+    diffs = np.diff(np.sort(np.unique(values)))
+    diffs = diffs[diffs > 0.0]
+    if diffs.size == 0:
+        return 1.0
+    return float(np.median(diffs))
+
+
+def _needs_display_kernel(prob_grid):
+    prob_grid = np.asarray(prob_grid, dtype=float)
+    finite = prob_grid[np.isfinite(prob_grid)]
+    if finite.size == 0:
+        return False
+    max_prob = float(np.max(finite))
+    if max_prob <= 0.0:
+        return False
+    active_cells = int(np.sum(finite >= max_prob * 0.05))
+    return max_prob >= 0.75 or active_cells <= 3
+
+
+def _smooth_probability_surface(lon_grid, lat_grid, prob_grid, upscale=45, sigma=1.4):
+    lon_grid = np.asarray(lon_grid, dtype=float)
+    lat_grid = np.asarray(lat_grid, dtype=float)
+    prob_grid = np.asarray(prob_grid, dtype=float)
+    lon_centers = np.nanmean(lon_grid, axis=0)
+    lat_centers = np.nanmean(lat_grid, axis=1)
+
+    lon_order = np.argsort(lon_centers)
+    lat_order = np.argsort(lat_centers)
+    lon_centers = lon_centers[lon_order]
+    lat_centers = lat_centers[lat_order]
+    prob_grid = prob_grid[np.ix_(lat_order, lon_order)]
+
+    n_lon = max(int(len(lon_centers) * upscale), 80)
+    n_lat = max(int(len(lat_centers) * upscale), 80)
+    fine_lon = np.linspace(float(lon_centers[0]), float(lon_centers[-1]), n_lon)
+    fine_lat = np.linspace(float(lat_centers[0]), float(lat_centers[-1]), n_lat)
+    fine_lon_grid, fine_lat_grid = np.meshgrid(fine_lon, fine_lat)
+
+    if _needs_display_kernel(prob_grid):
+        iy, ix = np.unravel_index(np.nanargmax(prob_grid), prob_grid.shape)
+        center_lon = float(lon_centers[ix])
+        center_lat = float(lat_centers[iy])
+        sigma_lon = max(_median_grid_spacing(lon_centers) * 0.6, 1e-12)
+        sigma_lat = max(_median_grid_spacing(lat_centers) * 0.6, 1e-12)
+        smooth = np.exp(
+            -0.5
+            * (
+                ((fine_lon_grid - center_lon) / sigma_lon) ** 2
+                + ((fine_lat_grid - center_lat) / sigma_lat) ** 2
+            )
+        )
+        smooth = smooth / float(np.sum(smooth))
+        return fine_lon_grid, fine_lat_grid, smooth
+
+    interp_lon = np.vstack(
+        [np.interp(fine_lon, lon_centers, row) for row in prob_grid]
+    )
+    smooth = np.vstack(
+        [np.interp(fine_lat, lat_centers, interp_lon[:, i]) for i in range(n_lon)]
+    ).T
+
+    sigma = max(float(sigma), 0.0)
+    if sigma > 0.0:
+        radius = max(1, int(3.0 * sigma))
+        x = np.arange(-radius, radius + 1, dtype=float)
+        kernel = np.exp(-(x**2) / (2.0 * sigma**2))
+        kernel = kernel / kernel.sum()
+        smooth = np.apply_along_axis(
+            lambda arr: np.convolve(arr, kernel, mode="same"), axis=0, arr=smooth
+        )
+        smooth = np.apply_along_axis(
+            lambda arr: np.convolve(arr, kernel, mode="same"), axis=1, arr=smooth
+        )
+
+    smooth = np.clip(smooth, 0.0, None)
+    total = float(np.sum(smooth))
+    if total > 0.0:
+        smooth = smooth / total
+    return fine_lon_grid, fine_lat_grid, smooth
+
+
+def _probability_thresholds(prob_grid, levels):
+    flat = np.asarray(prob_grid, dtype=float).reshape(-1)
+    flat = flat[np.isfinite(flat)]
+    if flat.size == 0 or float(np.sum(flat)) <= 0.0:
+        return {}
+    flat = np.sort(flat)[::-1]
+    cumsum = np.cumsum(flat)
+    thresholds = {}
+    for level in levels:
+        idx = np.searchsorted(cumsum, float(level), side="left")
+        idx = min(max(idx, 0), len(flat) - 1)
+        thresholds[str(level)] = float(flat[idx])
+    return thresholds
+
+
+def _draw_probability_regions(
+    ax,
+    lon_grid,
+    lat_grid,
+    prob_grid,
+    thresholds,
+    levels,
+    colors="#00e5ff",
+    linewidths=2.4,
+    fontsize=8,
+    zorder=2,
+):
+    if not thresholds or not levels:
+        return
+
+    fine_lon, fine_lat, smooth_prob = _smooth_probability_surface(
+        lon_grid, lat_grid, prob_grid
+    )
+    smooth_thresholds = _probability_thresholds(smooth_prob, levels)
+    contour_pairs = []
+
+    for level in sorted([float(v) for v in levels]):
+        key = str(level)
+        if key not in smooth_thresholds:
+            continue
+
+        threshold = float(smooth_thresholds[key])
+        if not np.isfinite(threshold):
+            continue
+        contour_pairs.append((threshold, f"{int(level * 100)}%"))
+
+    unique_pairs = []
+    for threshold, label in sorted(contour_pairs, key=lambda item: item[0]):
+        if unique_pairs and np.isclose(threshold, unique_pairs[-1][0]):
+            unique_pairs[-1] = (
+                unique_pairs[-1][0],
+                f"{unique_pairs[-1][1]}/{label}",
+            )
+        else:
+            unique_pairs.append((threshold, label))
+
+    if not unique_pairs:
+        return
+
+    cs = ax.contour(
+        fine_lon,
+        fine_lat,
+        smooth_prob,
+        levels=[p[0] for p in unique_pairs],
+        colors=colors,
+        linewidths=linewidths,
+        zorder=zorder + 0.5,
+    )
+    ax.clabel(
+        cs,
+        inline=True,
+        fontsize=fontsize,
+        fmt={threshold: label for threshold, label in unique_pairs},
+    )
+
+
+def plot_sites_and_source(
+    sites_plot,
+    pred_lon,
+    pred_lat,
+    confidence_map=None,
+    confidence_thresholds=None,
+    confidence_levels=None,
+    landscape_best=None,
+    confidence_warnings=None,
+    save_path=None,
+    show=True,
+):
+    fig, ax = plt.subplots(figsize=(6, 6))
+    if confidence_map is not None:
+        lon_grid = np.asarray(confidence_map.get("lon_grid"), dtype=float)
+        lat_grid = np.asarray(confidence_map.get("lat_grid"), dtype=float)
+        prob_grid = np.asarray(confidence_map.get("prob_grid"), dtype=float)
+        if lon_grid.size and lat_grid.size and prob_grid.size:
+            fine_lon, fine_lat, smooth_prob = _smooth_probability_surface(
+                lon_grid, lat_grid, prob_grid
+            )
+            smooth_display = smooth_prob / max(float(np.nanmax(smooth_prob)), 1e-12)
+            display_prob = np.ma.masked_less(
+                smooth_display, 0.02
+            )
+            mesh = ax.contourf(
+                fine_lon,
+                fine_lat,
+                display_prob,
+                levels=18,
+                cmap="YlOrRd",
+                alpha=0.34,
+                zorder=1,
+            )
+            cbar = fig.colorbar(mesh, ax=ax, fraction=0.046, pad=0.04)
+            cbar.set_label("Relative source probability")
+
+            _draw_probability_regions(
+                ax,
+                lon_grid,
+                lat_grid,
+                prob_grid,
+                confidence_thresholds,
+                confidence_levels,
+                colors="#00e5ff",
+                linewidths=2.4,
+                fontsize=8,
+                zorder=2,
+            )
+
+    ax.scatter(
+        sites_plot["lon"],
+        sites_plot["lat"],
+        c="blue",
+        s=80,
+        label="Stations",
+        zorder=4,
+    )
     for _, r in sites_plot.iterrows():
-        plt.text(
+        ax.text(
             r["lon"], r["lat"], str(r["station"]), fontsize=10, ha="left", va="bottom"
         )
-    plt.scatter(
-        pred_lon, pred_lat, c="red", s=150, marker="*", label="Estimated Source"
+    ax.scatter(
+        pred_lon,
+        pred_lat,
+        c="red",
+        s=150,
+        marker="*",
+        label="Trained source",
+        zorder=5,
     )
-    plt.xlabel("Longitude")
-    plt.ylabel("Latitude")
-    plt.title("Stations and Estimated Source")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
+    if landscape_best is not None:
+        ax.scatter(
+            landscape_best["lon"],
+            landscape_best["lat"],
+            c="#f97316",
+            s=120,
+            marker="X",
+            edgecolors="black",
+            linewidths=0.6,
+            label="Landscape best",
+            zorder=6,
+        )
+    ax.set_xlabel("Longitude")
+    ax.set_ylabel("Latitude")
+    title = (
+        "Stations, Trained Source, and Global Loss Region"
+        if confidence_map is not None
+        else "Stations and Trained Source"
+    )
+    if confidence_warnings:
+        title += " (warning)"
+    ax.set_title(title)
+    ax.legend()
+    ax.grid(True)
+    fig.tight_layout()
+    if save_path is not None:
+        fig.savefig(save_path, dpi=220)
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 def diffusion_animation(
