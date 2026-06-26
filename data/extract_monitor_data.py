@@ -18,11 +18,15 @@ DEFAULT_WIND_NAME = "wind.xlsx"
 INPUT_FILE_PATH = r"data\shsh_js\自动审核小时数据_标准单位_2025-10-16 00_00_00_2026-04-16 12_00_00.xlsx"
 
 # START_TIME / END_TIME: inclusive extraction time range.
-START_TIME = "2026-01-19 12:00:00"
-END_TIME = "2026-01-21 00:00:00"
+START_TIME = "2025-11-12 14:00:00"
+END_TIME = "2025-11-13 14:00:00"
 
 # TARGET_POLLUTANT: pollutant column name to extract.
 TARGET_POLLUTANT = "间-二甲苯+对-二甲苯"
+
+# WIND_STATION_NAME: use this station sheet's wind direction/speed to build wind.xlsx.
+# Leave empty to keep the old behavior: average wind from all station sheets.
+WIND_STATION_NAME = "上石化边界卫八路站"
 
 # OUTPUT_FOLDER:
 # - empty string: save directly into data/
@@ -41,6 +45,12 @@ def clean_station_name(sheet_name: str) -> str:
     for pattern in SHEET_SUFFIX_PATTERNS:
         name = re.sub(pattern, "", name)
     return name.strip()
+
+
+def station_name_matches(station_name: str, target_station_name: str | None) -> bool:
+    if target_station_name is None or not str(target_station_name).strip():
+        return True
+    return clean_station_name(station_name) == clean_station_name(target_station_name)
 
 
 def extract_numeric(value) -> float | None:
@@ -177,10 +187,17 @@ def build_wind_table(
     workbook: pd.ExcelFile,
     start_time: str | pd.Timestamp | None,
     end_time: str | pd.Timestamp | None,
+    wind_station_name: str | None = None,
 ) -> pd.DataFrame:
     wind_frames: list[pd.DataFrame] = []
+    matched_station = False
 
     for sheet_name in workbook.sheet_names:
+        station_name = clean_station_name(sheet_name)
+        if not station_name_matches(station_name, wind_station_name):
+            continue
+        matched_station = True
+
         df = pd.read_excel(workbook, sheet_name=sheet_name)
         df = filter_time_range(df, start_time, end_time)
         if df.empty:
@@ -199,6 +216,19 @@ def build_wind_table(
         wind_frames.append(station_wind)
 
     if not wind_frames:
+        if wind_station_name is not None and str(wind_station_name).strip():
+            if not matched_station:
+                available = ", ".join(
+                    clean_station_name(s) for s in workbook.sheet_names
+                )
+                raise ValueError(
+                    "Failed to build wind table: wind station "
+                    f"'{wind_station_name}' was not found. Available stations: {available}"
+                )
+            raise ValueError(
+                "Failed to build wind table: no wind data found for station "
+                f"'{wind_station_name}' in the requested time range."
+            )
         raise ValueError(
             "Failed to build wind table: no sheet contains both 风向 and 风速 columns."
         )
@@ -226,6 +256,7 @@ def extract_monitor_data(
     start_time: str | pd.Timestamp | None,
     end_time: str | pd.Timestamp | None,
     pollutant: str,
+    wind_station_name: str | None = None,
     output_folder: str | None = None,
 ) -> tuple[Path, Path]:
     workbook = load_workbook(input_path)
@@ -241,6 +272,7 @@ def extract_monitor_data(
         workbook=workbook,
         start_time=start_time,
         end_time=end_time,
+        wind_station_name=wind_station_name,
     )
 
     concentration_path = out_dir / DEFAULT_CONCENTRATION_NAME
@@ -258,12 +290,14 @@ def main() -> None:
         start_time=START_TIME,
         end_time=END_TIME,
         pollutant=TARGET_POLLUTANT,
+        wind_station_name=WIND_STATION_NAME,
         output_folder=OUTPUT_FOLDER,
     )
 
     print(f"Input workbook: {INPUT_FILE_PATH}")
     print(f"Time range: {START_TIME} -> {END_TIME}")
     print(f"Pollutant: {TARGET_POLLUTANT}")
+    print(f"Wind station: {WIND_STATION_NAME or 'all stations mean'}")
     print(f"Saved concentration file: {concentration_path}")
     print(f"Saved wind file: {wind_path}")
 

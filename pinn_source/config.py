@@ -38,6 +38,9 @@ PDE_SOURCE_MODE = "none"
 # OUTPUT_DIR: parent directory for timestamped run result folders.
 OUTPUT_DIR = r"C:\Document\phd\SourceInverse\SourceInverse\result"
 
+# TARGET_POLLUTANT: appended to timestamped result folder names.
+TARGET_POLLUTANT = "间-二甲苯+对-二甲苯"
+
 # MAKE_PLOTS: show/save the original diagnostic plots for a single run.
 MAKE_PLOTS = True
 

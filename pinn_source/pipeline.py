@@ -1,5 +1,6 @@
 import math
 import os
+import shutil
 import time
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ from config import (
     MODEL_NAME,
     DEVICE,
     OUTPUT_DIR,
+    TARGET_POLLUTANT,
     MAKE_PLOTS,
     ENABLE_WIND_VECTOR_SMOOTHING,
     WIND_SMOOTH_WINDOW,
@@ -207,18 +209,47 @@ def _apply_wind_vector_smoothing(data):
     return data
 
 
-def _make_timestamped_output_dir(output_dir, run_id=None):
+def _sanitize_folder_name(name):
+    text = str(name or "").strip()
+    text = "".join(
+        "_" if ch in '<>:"/\\|?*' or ord(ch) < 32 else ch for ch in text
+    )
+    text = "_".join(text.split())
+    return text.strip(" ._")
+
+
+def _make_timestamped_output_dir(output_dir, run_id=None, name_suffix=None):
     base_dir = Path(output_dir or OUTPUT_DIR)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    candidate = base_dir / timestamp
+    suffix = _sanitize_folder_name(name_suffix)
+    folder_name = f"{timestamp}_{suffix}" if suffix else timestamp
+    candidate = base_dir / folder_name
     suffix = 2
     while candidate.exists():
-        candidate = base_dir / f"{timestamp}_{suffix:02d}"
+        candidate = base_dir / f"{folder_name}_{suffix:02d}"
         suffix += 1
     if run_id is not None:
         candidate = candidate / f"run_{run_id}"
     candidate.mkdir(parents=True, exist_ok=True)
     return candidate
+
+
+def _copy_training_inputs(output_dir, site_path, conc_path, wind_path):
+    input_files = [
+        ("sites.xlsx", site_path),
+        ("concentration.xlsx", conc_path),
+        ("wind.xlsx", wind_path),
+    ]
+    copied_paths = {}
+    for output_name, source_path in input_files:
+        source = Path(source_path).expanduser().resolve()
+        if not source.exists():
+            raise FileNotFoundError(f"Training input file not found: {source}")
+        destination = output_dir / output_name
+        if source != destination.resolve():
+            shutil.copy2(source, destination)
+        copied_paths[output_name] = str(destination)
+    return copied_paths
 
 
 def run(
@@ -229,6 +260,7 @@ def run(
     output_dir=None,
     make_plots=None,
     run_id=None,
+    result_name_suffix=None,
 ):
     if random_seed is not None:
         np.random.seed(int(random_seed))
@@ -236,8 +268,22 @@ def run(
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(int(random_seed))
 
-    output_dir = _make_timestamped_output_dir(output_dir, run_id=run_id)
+    if result_name_suffix is None:
+        result_name_suffix = TARGET_POLLUTANT
+    output_dir = _make_timestamped_output_dir(
+        output_dir, run_id=run_id, name_suffix=result_name_suffix
+    )
     print(f"Output directory: {output_dir}")
+    copied_input_paths = _copy_training_inputs(
+        output_dir=output_dir,
+        site_path=site_path,
+        conc_path=conc_path,
+        wind_path=wind_path,
+    )
+    print(
+        "Saved training input copies: "
+        + ", ".join(str(Path(path).name) for path in copied_input_paths.values())
+    )
     make_plots = MAKE_PLOTS if make_plots is None else bool(make_plots)
 
     sites, lon0, lat0 = load_sites(site_path)
@@ -1724,6 +1770,7 @@ def run(
             )
 
     quality_payload = {
+        "training_inputs": copied_input_paths,
         "source": {
             "mode": "single",
             "x_m": float(xs_p),
@@ -1970,6 +2017,7 @@ def run(
         "q_l2_loss": float(q_l2_loss.detach().item()),
         "best_raw_loss": float(best_raw_loss),
         "output_dir": str(output_dir),
+        "training_inputs": copied_input_paths,
     }
 
     if landscape is not None:
