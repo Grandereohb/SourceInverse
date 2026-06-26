@@ -3,6 +3,8 @@ import pandas as pd
 
 from geo_utils import dms_to_decimal, latlon_to_xy
 
+TARGET_POLLUTANT_COLUMN = "TARGET_POLLUTANT"
+
 
 def load_sites(path):
     df = pd.read_excel(path)
@@ -65,7 +67,21 @@ def load_conc(path):
     out = df.copy()
     out = out.rename(columns={t_col: "time"})
     out["time"] = pd.to_datetime(out["time"])
+    if TARGET_POLLUTANT_COLUMN in out.columns:
+        values = out[TARGET_POLLUTANT_COLUMN].dropna().astype(str).str.strip()
+        values = values[values != ""]
+        if not values.empty:
+            out.attrs["target_pollutant"] = values.iloc[0]
+        out = out.drop(columns=[TARGET_POLLUTANT_COLUMN])
     return out
+
+
+def get_concentration_target_pollutant(conc_df):
+    value = conc_df.attrs.get("target_pollutant")
+    if value is None:
+        return None
+    value = str(value).strip()
+    return value or None
 
 
 def wind_dir_to_uv(dir_deg, sp, is_from=True):

@@ -118,7 +118,13 @@ from config import (
     AXIS_LOSS_LOW_WIND_FACTOR,
     CORRIDOR_LOSS_LOW_WIND_FACTOR,
 )
-from data_io import load_sites, load_wind, load_conc, wind_dir_to_uv
+from data_io import (
+    load_sites,
+    load_wind,
+    load_conc,
+    get_concentration_target_pollutant,
+    wind_dir_to_uv,
+)
 from model_registry import get_model
 from adaptive_loss import AdaptiveLossWeights
 from field import predict_concentration, field_components, concentration_from_components
@@ -268,8 +274,11 @@ def run(
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(int(random_seed))
 
+    conc = load_conc(conc_path)
+    conc_target_pollutant = get_concentration_target_pollutant(conc)
     if result_name_suffix is None:
-        result_name_suffix = TARGET_POLLUTANT
+        result_name_suffix = conc_target_pollutant or TARGET_POLLUTANT
+    result_target_pollutant = conc_target_pollutant or result_name_suffix
     output_dir = _make_timestamped_output_dir(
         output_dir, run_id=run_id, name_suffix=result_name_suffix
     )
@@ -288,7 +297,6 @@ def run(
 
     sites, lon0, lat0 = load_sites(site_path)
     wind = load_wind(wind_path)
-    conc = load_conc(conc_path)
 
     # Merge on time
     data = conc.merge(wind, on="time", how="inner")
@@ -1770,6 +1778,7 @@ def run(
             )
 
     quality_payload = {
+        "target_pollutant": result_target_pollutant,
         "training_inputs": copied_input_paths,
         "source": {
             "mode": "single",
@@ -2017,6 +2026,7 @@ def run(
         "q_l2_loss": float(q_l2_loss.detach().item()),
         "best_raw_loss": float(best_raw_loss),
         "output_dir": str(output_dir),
+        "target_pollutant": result_target_pollutant,
         "training_inputs": copied_input_paths,
     }
 

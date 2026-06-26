@@ -301,6 +301,7 @@ def build_concentration_and_wind_tables(
         concentration_df = concentration_df.merge(frame, on=TIME_COLUMN, how="outer")
 
     concentration_df = concentration_df.sort_values(TIME_COLUMN).reset_index(drop=True)
+    concentration_df["TARGET_POLLUTANT"] = pollutant
 
     wind_long = pd.concat(wind_frames, ignore_index=True)
     grouped_rows = []

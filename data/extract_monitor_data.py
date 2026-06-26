@@ -18,15 +18,15 @@ DEFAULT_WIND_NAME = "wind.xlsx"
 INPUT_FILE_PATH = r"data\shsh_js\自动审核小时数据_标准单位_2025-10-16 00_00_00_2026-04-16 12_00_00.xlsx"
 
 # START_TIME / END_TIME: inclusive extraction time range.
-START_TIME = "2025-11-12 14:00:00"
-END_TIME = "2025-11-13 14:00:00"
+START_TIME = "2026-02-15 16:00:00"
+END_TIME = "2026-02-16 16:00:00"
 
 # TARGET_POLLUTANT: pollutant column name to extract.
-TARGET_POLLUTANT = "间-二甲苯+对-二甲苯"
+TARGET_POLLUTANT = "硫化氢"
 
 # WIND_STATION_NAME: use this station sheet's wind direction/speed to build wind.xlsx.
 # Leave empty to keep the old behavior: average wind from all station sheets.
-WIND_STATION_NAME = "上石化边界卫八路站"
+WIND_STATION_NAME = "金山省界站"
 
 # OUTPUT_FOLDER:
 # - empty string: save directly into data/
@@ -38,6 +38,25 @@ SHEET_SUFFIX_PATTERNS = [
     r"\(带标识\)$",
     r"（带标识）$",
 ]
+
+SUBSCRIPT_TRANSLATION = str.maketrans(
+    {
+        "₀": "0",
+        "₁": "1",
+        "₂": "2",
+        "₃": "3",
+        "₄": "4",
+        "₅": "5",
+        "₆": "6",
+        "₇": "7",
+        "₈": "8",
+        "₉": "9",
+        "₊": "+",
+        "₋": "-",
+        "₍": "(",
+        "₎": ")",
+    }
+)
 
 
 def clean_station_name(sheet_name: str) -> str:
@@ -93,13 +112,33 @@ def filter_time_range(
     return out.sort_values("时间").reset_index(drop=True)
 
 
-def find_column(columns: list[str], target: str) -> str | None:
-    if target in columns:
-        return target
+def normalize_column_name(name: str) -> str:
+    text = str(name).strip().translate(SUBSCRIPT_TRANSLATION).lower()
+    text = text.replace("（", "(").replace("）", ")")
+    text = re.sub(r"\s+", "", text)
+    return text
 
-    target_norm = str(target).strip().lower()
+
+def column_match_keys(name: str) -> set[str]:
+    text = normalize_column_name(name)
+    keys = {text}
+
+    without_parentheses = re.sub(r"\([^)]*\)", "", text)
+    if without_parentheses:
+        keys.add(without_parentheses)
+
+    for inner in re.findall(r"\(([^)]*)\)", text):
+        inner = inner.strip()
+        if inner:
+            keys.add(inner)
+
+    return keys
+
+
+def find_column(columns: list[str], target: str) -> str | None:
+    target_keys = column_match_keys(target)
     for col in columns:
-        if str(col).strip().lower() == target_norm:
+        if target_keys.intersection(column_match_keys(col)):
             return col
     return None
 
@@ -180,6 +219,7 @@ def build_concentration_table(
         merged = merged.merge(frame, on="时间", how="outer")
 
     merged = merged.sort_values("时间").reset_index(drop=True)
+    merged["TARGET_POLLUTANT"] = pollutant
     return merged
 
 
