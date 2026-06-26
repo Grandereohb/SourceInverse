@@ -1,9 +1,11 @@
 # =========================
 # Data Paths
 # =========================
-SITE_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\jjj\sites.xlsx"
-CONC_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\jjj\concentration.xlsx"
-WIND_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\jjj\wind.xlsx"
+SITE_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh_js\sites.xlsx"
+CONC_PATH = (
+    r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh_js\concentration.xlsx"
+)
+WIND_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh_js\wind.xlsx"
 
 # =========================
 # Model Selection
@@ -33,8 +35,8 @@ PDE_SOURCE_MODE = "none"
 # =========================
 # Output
 # =========================
-# OUTPUT_DIR: directory used for CSV/JSON diagnostics and generated figures.
-OUTPUT_DIR = r"C:\Document\phd\SourceInverse\SourceInverse\result\source_uncertainty"
+# OUTPUT_DIR: parent directory for timestamped run result folders.
+OUTPUT_DIR = r"C:\Document\phd\SourceInverse\SourceInverse\result"
 
 # MAKE_PLOTS: show/save the original diagnostic plots for a single run.
 MAKE_PLOTS = True

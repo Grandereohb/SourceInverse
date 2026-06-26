@@ -1,6 +1,7 @@
 import math
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -206,6 +207,20 @@ def _apply_wind_vector_smoothing(data):
     return data
 
 
+def _make_timestamped_output_dir(output_dir, run_id=None):
+    base_dir = Path(output_dir or OUTPUT_DIR)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    candidate = base_dir / timestamp
+    suffix = 2
+    while candidate.exists():
+        candidate = base_dir / f"{timestamp}_{suffix:02d}"
+        suffix += 1
+    if run_id is not None:
+        candidate = candidate / f"run_{run_id}"
+    candidate.mkdir(parents=True, exist_ok=True)
+    return candidate
+
+
 def run(
     site_path,
     conc_path,
@@ -221,10 +236,8 @@ def run(
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(int(random_seed))
 
-    output_dir = Path(output_dir or OUTPUT_DIR)
-    if run_id is not None:
-        output_dir = output_dir / f"run_{run_id}"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = _make_timestamped_output_dir(output_dir, run_id=run_id)
+    print(f"Output directory: {output_dir}")
     make_plots = MAKE_PLOTS if make_plots is None else bool(make_plots)
 
     sites, lon0, lat0 = load_sites(site_path)
