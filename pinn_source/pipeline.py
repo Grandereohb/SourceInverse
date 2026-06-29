@@ -1935,13 +1935,19 @@ def run(
         print("Result quality warnings: " + "; ".join(quality_warnings))
 
     if make_plots:
+        auto_close_plots = os.environ.get("PINN_AUTO_CLOSE_PLOTS", "").strip() == "1"
+        show_plots = not auto_close_plots
+        station_timeseries_path = output_dir / "station_timeseries.png"
         plot_station_timeseries(
             times=np.array(obs_time_labels, dtype="datetime64[ns]"),
             station_names=np.array(obs_station_labels, dtype=object),
             obs_values=c_obs_raw,
             pred_values=pred_diag_raw.detach().cpu().numpy().reshape(-1),
             title="Observed vs Predicted Concentration by Station",
+            save_path=station_timeseries_path,
+            show=show_plots,
         )
+        print(f"Saved station time-series plot: {station_timeseries_path}")
 
         sites_source_path = output_dir / (
             "sites_source_confidence.png"
@@ -1968,9 +1974,9 @@ def run(
                 else None
             ),
             save_path=sites_source_path,
-            show=True,
+            show=show_plots,
         )
-        print(f"Saved and displayed source confidence/site plot: {sites_source_path}")
+        print(f"Saved source confidence/site plot: {sites_source_path}")
 
         diffusion_animation(
             model,
@@ -2001,6 +2007,7 @@ def run(
             nx=DIFFUSION_NX,
             ny=DIFFUSION_NY,
             out_gif=str(output_dir / "diffusion.gif"),
+            show=show_plots,
         )
 
     final_result = {

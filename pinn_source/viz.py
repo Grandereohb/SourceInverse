@@ -309,6 +309,7 @@ def diffusion_animation(
     nx=120,
     ny=120,
     out_gif="diffusion.gif",
+    show=True,
 ):
     model.eval()
     xs_lin = np.linspace(x_min, x_max, nx)
@@ -413,7 +414,10 @@ def diffusion_animation(
         fig, frame_fn, frames=n_frames, interval=200, blit=False
     )
     ani.save(out_gif, writer="pillow", fps=5)
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 def plot_station_timeseries(
@@ -422,6 +426,8 @@ def plot_station_timeseries(
     obs_values,
     pred_values,
     title="Observed vs Predicted Concentration",
+    save_path=None,
+    show=True,
 ):
     times = np.asarray(times)
     station_names = np.asarray(station_names)
@@ -466,4 +472,9 @@ def plot_station_timeseries(
     fig.legend(handles, labels, loc="upper center", ncol=2, frameon=True)
     fig.suptitle(title)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    plt.show()
+    if save_path is not None:
+        fig.savefig(save_path, dpi=220)
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)

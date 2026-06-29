@@ -8,7 +8,9 @@ from pathlib import Path
 import pandas as pd
 
 
-DATA_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
+DATA_DIR = REPO_ROOT / "data"
 DEFAULT_CONCENTRATION_NAME = "concentration.xlsx"
 DEFAULT_WIND_NAME = "wind.xlsx"
 
