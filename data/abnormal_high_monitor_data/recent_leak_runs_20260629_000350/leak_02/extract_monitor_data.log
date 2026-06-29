@@ -1,8 +1,0 @@
-> C:\Document\phd\SourceInverse\SourceInverse\.venv_clean\Scripts\python.exe C:\Document\phd\SourceInverse\SourceInverse\data\extract_monitor_data.py
-
-Input workbook: data/shsh_js/自动审核小时数据_标准单位_2025-10-16 00_00_00_2026-04-16 12_00_00.xlsx
-Time range: 2026-04-15 04:00:00 -> 2026-04-15 16:00:00
-Pollutant: 硫化氢(H₂S)
-Wind station: 二工区南部园区站（抚佳）
-Saved concentration file: C:\Document\phd\SourceInverse\SourceInverse\data\shsh_js\concentration.xlsx
-Saved wind file: C:\Document\phd\SourceInverse\SourceInverse\data\shsh_js\wind.xlsx

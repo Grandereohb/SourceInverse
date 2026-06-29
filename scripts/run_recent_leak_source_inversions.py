@@ -16,7 +16,6 @@ DATA_DIR = REPO_ROOT / "data"
 RESULT_DIR = REPO_ROOT / "result"
 
 ABNORMAL_DIR = DATA_DIR / "abnormal_high_monitor_data"
-EXTRACT_SCRIPT = SCRIPT_DIR / "extract_monitor_data.py"
 PINN_SCRIPT = REPO_ROOT / "pinn_source" / "pinn_source_pinn.py"
 
 INPUT_FILE_PATH = (
@@ -25,6 +24,26 @@ INPUT_FILE_PATH = (
     / "自动审核小时数据_标准单位_2025-10-16 00_00_00_2026-04-16 12_00_00.xlsx"
 )
 OUTPUT_FOLDER = "shsh_js"
+
+
+def resolve_extract_script(output_folder: str) -> Path:
+    candidates = []
+    if output_folder:
+        candidates.append(SCRIPT_DIR / f"extract_monitor_data_{output_folder}.py")
+    candidates.extend(
+        [
+            SCRIPT_DIR / "extract_monitor_data.py",
+            DATA_DIR / "extract_monitor_data.py",
+        ]
+    )
+    for path in candidates:
+        if path.exists():
+            return path
+    searched = "\n".join(f"- {path}" for path in candidates)
+    raise FileNotFoundError(f"No extract monitor script found. Searched:\n{searched}")
+
+
+EXTRACT_SCRIPT = resolve_extract_script(OUTPUT_FOLDER)
 
 # =========================
 # Manual Inputs
