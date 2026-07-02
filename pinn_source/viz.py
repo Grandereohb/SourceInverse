@@ -6,8 +6,8 @@ from matplotlib import animation
 import matplotlib.pyplot as plt
 
 from geo_utils import xy_to_latlon
-from config import VISUALIZE_GATE_ONLY, ADD_BASELINE_TO_VIZ
-from field import predict_concentration, field_components
+from config import ADD_BASELINE_TO_VIZ
+from field import predict_concentration
 
 # Font config for CJK labels
 mpl.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "Arial Unicode MS"]
@@ -333,15 +333,9 @@ def diffusion_animation(
         u_t = torch.full((xyt_t.shape[0], 1), float(u_tf), dtype=torch.float32, device=device)
         v_t = torch.full((xyt_t.shape[0], 1), float(v_tf), dtype=torch.float32, device=device)
         with torch.no_grad():
-            if VISUALIZE_GATE_ONLY:
-                _, _, _, gate, _ = field_components(
-                    model, xyt_t, u_t, v_t, sigma_src=sigma_src
-                )
-                cc = gate.cpu().numpy().reshape(ny, nx)
-            else:
-                cc = predict_concentration(
-                    model, xyt_t, u_t, v_t, sigma_src=sigma_src
-                ).cpu().numpy().reshape(ny, nx)
+            cc = predict_concentration(
+                model, xyt_t, u_t, v_t, sigma_src=sigma_src
+            ).cpu().numpy().reshape(ny, nx)
         cc = cc * c_scale
         if ADD_BASELINE_TO_VIZ and baseline_w is not None:
             cc = cc + float(np.interp(tf, t_w, baseline_w))
@@ -403,7 +397,7 @@ def diffusion_animation(
     ax.set_ylabel("Latitude")
     ax.legend(loc="upper right")
     cbar = fig.colorbar(im, ax=ax)
-    cbar.set_label("Gate" if VISUALIZE_GATE_ONLY else "Concentration")
+    cbar.set_label("Concentration")
 
     def frame_fn(i):
         im.set_data(frames[i])

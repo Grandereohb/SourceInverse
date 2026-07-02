@@ -1,25 +1,17 @@
 import torch
+import torch.nn.functional as F
 
 from config import (
-    FIELD_MODE,
-    GATE_CORE_SCALE,
-    GATE_CROSS_SCALE,
-    GATE_CROSS_MIN,
-    GATE_STEEPNESS_SCALE,
-    GATE_STEEPNESS_MIN,
-    GATE_DECAY_SCALE,
-    GATE_DECAY_MIN,
-    GATE_FLOOR,
-    GATE_DOWNWIND_BROADEN,
-    ANALYTIC_PLUME_LAG_STEPS,
-    ANALYTIC_PLUME_MAX_AGE,
-    ANALYTIC_PLUME_MIN_AGE,
-    ANALYTIC_PLUME_AGE_DECAY,
-    ANALYTIC_PLUME_ALONG_SPREAD,
-    ANALYTIC_PLUME_CROSS_SPREAD,
-    ANALYTIC_PLUME_TRANSPORT_SCALE,
-    ANALYTIC_PLUME_SOURCE_CORE_WEIGHT,
+    RECURRENT_DECAY,
+    RECURRENT_GRID_NX,
+    RECURRENT_GRID_NY,
+    RECURRENT_INITIAL_RELEASE_FRACTION,
+    RECURRENT_SOURCE_SCALE,
+    RECURRENT_SUBSTEPS,
 )
+
+
+FIELD_MODE = "recurrent_pde"
 
 
 def _match_column(tensor):
@@ -28,195 +20,261 @@ def _match_column(tensor):
     return tensor
 
 
-def _interp_history(t_query, t_hist, value_hist):
-    t_query = _match_column(t_query)
-    if t_hist.numel() == 0 or value_hist.numel() == 0:
-        return torch.zeros_like(t_query)
-    t_hist = t_hist.to(device=t_query.device, dtype=t_query.dtype).view(-1)
-    value_hist = value_hist.to(device=t_query.device, dtype=t_query.dtype).view(-1)
-    if t_hist.numel() == 1:
-        return value_hist[0].expand_as(t_query)
+def configure_recurrent_context(
+    model,
+    x_min,
+    x_max,
+    y_min,
+    y_max,
+    t_values,
+    u_values,
+    v_values,
+    d_min_norm=0.0,
+    d_scale_norm=1.0,
+    nx=None,
+    ny=None,
+):
+    nx = max(8, int(RECURRENT_GRID_NX if nx is None else nx))
+    ny = max(8, int(RECURRENT_GRID_NY if ny is None else ny))
+    dtype = torch.float32
+    device = next(model.parameters()).device
 
-    t_flat = t_query.reshape(-1)
-    idx_hi = torch.bucketize(t_flat.contiguous(), t_hist)
-    idx_hi = torch.clamp(idx_hi, min=1, max=t_hist.numel() - 1)
+    model.recurrent_d_min_norm = float(d_min_norm)
+    model.recurrent_d_scale_norm = float(d_scale_norm)
+    model.recurrent_x_grid = torch.linspace(
+        float(x_min), float(x_max), steps=nx, dtype=dtype, device=device
+    )
+    model.recurrent_y_grid = torch.linspace(
+        float(y_min), float(y_max), steps=ny, dtype=dtype, device=device
+    )
+    model.recurrent_times = torch.as_tensor(
+        t_values, dtype=dtype, device=device
+    ).view(-1)
+    model.recurrent_u = torch.as_tensor(u_values, dtype=dtype, device=device).view(-1)
+    model.recurrent_v = torch.as_tensor(v_values, dtype=dtype, device=device).view(-1)
+
+
+def _has_recurrent_context(model):
+    return (
+        hasattr(model, "recurrent_x_grid")
+        and hasattr(model, "recurrent_y_grid")
+        and hasattr(model, "recurrent_times")
+        and model.recurrent_times.numel() > 0
+    )
+
+
+def _sample_grid_bilinear(field, x_query, y_query, x_grid, y_grid):
+    x_query = _match_column(x_query).view(-1)
+    y_query = _match_column(y_query).view(-1)
+    ny, nx = field.shape
+    x_min = x_grid[0]
+    x_max = x_grid[-1]
+    y_min = y_grid[0]
+    y_max = y_grid[-1]
+    gx = (x_query - x_min) / torch.clamp(x_max - x_min, min=1e-8) * (nx - 1)
+    gy = (y_query - y_min) / torch.clamp(y_max - y_min, min=1e-8) * (ny - 1)
+    gx = torch.clamp(gx, 0.0, float(nx - 1))
+    gy = torch.clamp(gy, 0.0, float(ny - 1))
+
+    x0 = torch.floor(gx).long()
+    y0 = torch.floor(gy).long()
+    x1 = torch.clamp(x0 + 1, max=nx - 1)
+    y1 = torch.clamp(y0 + 1, max=ny - 1)
+    wx = (gx - x0.to(gx.dtype)).view(-1, 1)
+    wy = (gy - y0.to(gy.dtype)).view(-1, 1)
+
+    flat = field.reshape(-1)
+    f00 = flat[y0 * nx + x0].view(-1, 1)
+    f10 = flat[y0 * nx + x1].view(-1, 1)
+    f01 = flat[y1 * nx + x0].view(-1, 1)
+    f11 = flat[y1 * nx + x1].view(-1, 1)
+    return (
+        (1.0 - wx) * (1.0 - wy) * f00
+        + wx * (1.0 - wy) * f10
+        + (1.0 - wx) * wy * f01
+        + wx * wy * f11
+    )
+
+
+def _advect_field(field, x_grid, y_grid, u, v, dt):
+    yy, xx = torch.meshgrid(y_grid, x_grid, indexing="ij")
+    x_back = xx.reshape(-1) - u * dt
+    y_back = yy.reshape(-1) - v * dt
+    return _sample_grid_bilinear(field, x_back, y_back, x_grid, y_grid).view_as(field)
+
+
+def _diffuse_field(field, x_grid, y_grid, diffusion, dt):
+    dx = torch.clamp(x_grid[1] - x_grid[0], min=1e-8)
+    dy = torch.clamp(y_grid[1] - y_grid[0], min=1e-8)
+    padded = F.pad(field.view(1, 1, *field.shape), (1, 1, 1, 1), mode="replicate")[
+        0, 0
+    ]
+    center = padded[1:-1, 1:-1]
+    lap = (
+        (padded[1:-1, 2:] - 2.0 * center + padded[1:-1, :-2]) / (dx**2)
+        + (padded[2:, 1:-1] - 2.0 * center + padded[:-2, 1:-1]) / (dy**2)
+    )
+    stable_max = 0.22 * torch.minimum(dx**2, dy**2) / torch.clamp(dt, min=1e-8)
+    diffusion_eff = torch.clamp(
+        diffusion, min=0.0, max=float(stable_max.detach().cpu().item())
+    )
+    return torch.clamp(field + diffusion_eff * dt * lap, min=0.0)
+
+
+def _source_grid(model, t_value, x_grid, y_grid, sigma_src):
+    yy, xx = torch.meshgrid(y_grid, x_grid, indexing="ij")
+    xs, ys = model.source_xy(t_value.view(1, 1))
+    sigma = max(float(sigma_src), 1e-4)
+    src = torch.exp(-((xx - xs) ** 2 + (yy - ys) ** 2) / (2.0 * sigma**2))
+    dx = torch.clamp(x_grid[1] - x_grid[0], min=1e-8)
+    dy = torch.clamp(y_grid[1] - y_grid[0], min=1e-8)
+    mass = torch.clamp(torch.sum(src) * dx * dy, min=1e-8)
+    return src / mass
+
+
+def _advance_recurrent_step(
+    field,
+    source,
+    q_value,
+    x_grid,
+    y_grid,
+    u_value,
+    v_value,
+    diffusion,
+    decay,
+    source_scale,
+    dt,
+):
+    field = field + source_scale * q_value * source * dt
+    field = _advect_field(field, x_grid, y_grid, u_value, v_value, dt)
+    field = _diffuse_field(field, x_grid, y_grid, diffusion, dt)
+    if decay > 0.0:
+        field = field * torch.exp(-dt * decay)
+    return field
+
+
+def recurrent_plume_fields(model, sigma_src):
+    if not _has_recurrent_context(model):
+        raise RuntimeError("Recurrent plume context has not been configured.")
+
+    x_grid = model.recurrent_x_grid.to(device=model.xs.device, dtype=model.xs.dtype)
+    y_grid = model.recurrent_y_grid.to(device=model.xs.device, dtype=model.xs.dtype)
+    t_values = model.recurrent_times.to(device=model.xs.device, dtype=model.xs.dtype)
+    u_values = model.recurrent_u.to(device=model.xs.device, dtype=model.xs.dtype)
+    v_values = model.recurrent_v.to(device=model.xs.device, dtype=model.xs.dtype)
+
+    field = torch.zeros(
+        (y_grid.numel(), x_grid.numel()), dtype=model.xs.dtype, device=model.xs.device
+    )
+    fields = []
+    diffusion = (
+        float(getattr(model, "recurrent_d_min_norm", 0.0))
+        + model.D() * float(getattr(model, "recurrent_d_scale_norm", 1.0))
+    )
+    substeps = max(1, int(RECURRENT_SUBSTEPS))
+    decay = max(float(RECURRENT_DECAY), 0.0)
+    source_scale = float(RECURRENT_SOURCE_SCALE)
+
+    if t_values.numel() == 1:
+        source = _source_grid(model, t_values[0], x_grid, y_grid, sigma_src)
+        field = field + source_scale * model.Q(t_values[0].view(1, 1)).view(()) * source
+        fields.append(field)
+        return torch.stack(fields, dim=0)
+
+    warmup_fraction = max(float(RECURRENT_INITIAL_RELEASE_FRACTION), 0.0)
+    if warmup_fraction > 0.0:
+        first_dt_total = torch.clamp(t_values[1] - t_values[0], min=1e-6)
+        warmup_dt_total = first_dt_total * warmup_fraction
+        warmup_steps = max(1, int(round(substeps * warmup_fraction)))
+        warmup_dt = warmup_dt_total / warmup_steps
+        warmup_source = _source_grid(model, t_values[0], x_grid, y_grid, sigma_src)
+        warmup_q = model.Q(t_values[0].view(1, 1)).view(())
+        for _ in range(warmup_steps):
+            field = _advance_recurrent_step(
+                field,
+                warmup_source,
+                warmup_q,
+                x_grid,
+                y_grid,
+                u_values[0],
+                v_values[0],
+                diffusion,
+                decay,
+                source_scale,
+                warmup_dt,
+            )
+
+    fields.append(field)
+    for i in range(t_values.numel() - 1):
+        t_i = t_values[i]
+        dt_total = torch.clamp(t_values[i + 1] - t_i, min=1e-6)
+        dt = dt_total / substeps
+        source = _source_grid(model, t_i, x_grid, y_grid, sigma_src)
+        q_i = model.Q(t_i.view(1, 1)).view(())
+        for _ in range(substeps):
+            field = _advance_recurrent_step(
+                field,
+                source,
+                q_i,
+                x_grid,
+                y_grid,
+                u_values[i],
+                v_values[i],
+                diffusion,
+                decay,
+                source_scale,
+                dt,
+            )
+        fields.append(field)
+
+    return torch.stack(fields, dim=0)
+
+
+def recurrent_plume_value(model, xyt, sigma_src):
+    fields = recurrent_plume_fields(model, sigma_src)
+    x_grid = model.recurrent_x_grid.to(device=xyt.device, dtype=xyt.dtype)
+    y_grid = model.recurrent_y_grid.to(device=xyt.device, dtype=xyt.dtype)
+    t_grid = model.recurrent_times.to(device=xyt.device, dtype=xyt.dtype)
+    x_query = xyt[:, 0:1]
+    y_query = xyt[:, 1:2]
+    t_query = xyt[:, 2:3].view(-1)
+
+    if t_grid.numel() == 1:
+        return _sample_grid_bilinear(fields[0], x_query, y_query, x_grid, y_grid)
+
+    idx_hi = torch.bucketize(t_query.contiguous(), t_grid)
+    idx_hi = torch.clamp(idx_hi, min=1, max=t_grid.numel() - 1)
     idx_lo = idx_hi - 1
-    t_lo = t_hist[idx_lo]
-    t_hi = t_hist[idx_hi]
-    v_lo = value_hist[idx_lo]
-    v_hi = value_hist[idx_hi]
-    alpha = (t_flat - t_lo) / torch.clamp(t_hi - t_lo, min=1e-6)
-    alpha = torch.clamp(alpha, min=0.0, max=1.0)
-    return (v_lo + alpha * (v_hi - v_lo)).view_as(t_query)
+    t_lo = t_grid[idx_lo]
+    t_hi = t_grid[idx_hi]
+    alpha = ((t_query - t_lo) / torch.clamp(t_hi - t_lo, min=1e-6)).view(-1, 1)
+    alpha = torch.clamp(alpha, 0.0, 1.0)
 
-
-def _transport_wind_at(model, t_query, fallback_u, fallback_v):
-    if (
-        hasattr(model, "transport_times")
-        and model.transport_times.numel() > 0
-        and model.transport_u.numel() > 0
-        and model.transport_v.numel() > 0
-    ):
-        u_hist = _interp_history(t_query, model.transport_times, model.transport_u)
-        v_hist = _interp_history(t_query, model.transport_times, model.transport_v)
-        return u_hist, v_hist
-    return _match_column(fallback_u), _match_column(fallback_v)
-
-
-def source_aligned_coords(xyt, u, v, model):
-    u = _match_column(u)
-    v = _match_column(v)
-
-    if hasattr(model, "source_xy"):
-        xs, ys = model.source_xy(xyt[:, 2:3])
-    else:
-        xs, ys = model.xs, model.ys
-    dx = xyt[:, 0:1] - xs
-    dy = xyt[:, 1:2] - ys
-
-    speed = torch.sqrt(u**2 + v**2 + 1e-12)
-    ex = u / speed
-    ey = v / speed
-
-    along = dx * ex + dy * ey
-    cross = -dx * ey + dy * ex
-    return along, cross, dx, dy
-
-
-def source_gate(xyt, u, v, model, sigma_src):
-    along, cross, dx, dy = source_aligned_coords(xyt, u, v, model)
-
-    sigma_core = max(float(sigma_src), 1e-4)
-    sigma_core_gate = max(GATE_CORE_SCALE * sigma_core, 1e-4)
-    sigma_cross = max(GATE_CROSS_SCALE * sigma_core, GATE_CROSS_MIN)
-    gate_steepness = max(GATE_STEEPNESS_SCALE * sigma_core, GATE_STEEPNESS_MIN)
-    decay_length = max(GATE_DECAY_SCALE * sigma_core, GATE_DECAY_MIN)
-    downwind_broaden = max(float(GATE_DOWNWIND_BROADEN), 1.0)
-    gate_floor = min(max(float(GATE_FLOOR), 0.0), 0.95)
-
-    source_core = torch.exp(-(dx**2 + dy**2) / (2.0 * sigma_core_gate**2))
-    downwind_weight = torch.sigmoid(along / gate_steepness) ** 2
-    sigma_cross_eff = sigma_cross * (1.0 + (downwind_broaden - 1.0) * downwind_weight)
-    plume_tail = (
-        downwind_weight
-        * torch.exp(-(cross**2) / (2.0 * sigma_cross_eff**2))
-        * torch.exp(-torch.relu(along) / decay_length)
-    )
-    gate_raw = torch.clamp(source_core + plume_tail, min=0.0, max=1.0)
-    return gate_floor + (1.0 - gate_floor) * gate_raw
-
-
-def analytic_plume_kernel(xyt, u, v, model, sigma_src):
-    _, _, dx, dy = source_aligned_coords(xyt, u, v, model)
-
-    sigma_core = max(float(sigma_src), 1e-4)
-    sigma_core_gate = max(GATE_CORE_SCALE * sigma_core, 1e-4)
-    sigma_cross = max(GATE_CROSS_SCALE * sigma_core, GATE_CROSS_MIN)
-    lag_steps = max(1, int(ANALYTIC_PLUME_LAG_STEPS))
-    max_age = max(float(ANALYTIC_PLUME_MAX_AGE), 0.0)
-    min_age = max(float(ANALYTIC_PLUME_MIN_AGE), 0.0)
-    min_age = min(min_age, max_age)
-    age_decay = max(float(ANALYTIC_PLUME_AGE_DECAY), 1e-4)
-    along_spread = max(float(ANALYTIC_PLUME_ALONG_SPREAD), 0.0)
-    cross_spread = max(float(ANALYTIC_PLUME_CROSS_SPREAD), 0.0)
-    transport_scale = max(float(ANALYTIC_PLUME_TRANSPORT_SCALE), 0.0)
-    source_core_weight = min(max(float(ANALYTIC_PLUME_SOURCE_CORE_WEIGHT), 0.0), 1.0)
-
-    if lag_steps == 1 or max_age <= 0.0:
-        along, cross, _, _ = source_aligned_coords(xyt, u, v, model)
-        source_core = torch.exp(-(dx**2 + dy**2) / (2.0 * sigma_core_gate**2))
-        downwind_weight = torch.sigmoid(along / max(GATE_STEEPNESS_MIN, 1e-4)) ** 2
-        plume_tail = (
-            downwind_weight
-            * torch.exp(-(cross**2) / (2.0 * sigma_cross**2))
-            * torch.exp(-torch.relu(along) / max(GATE_DECAY_MIN, 1e-4))
+    val_lo = torch.empty((t_query.numel(), 1), dtype=xyt.dtype, device=xyt.device)
+    val_hi = torch.empty((t_query.numel(), 1), dtype=xyt.dtype, device=xyt.device)
+    for layer in torch.unique(idx_lo):
+        mask = idx_lo == layer
+        val_lo[mask] = _sample_grid_bilinear(
+            fields[layer], x_query[mask], y_query[mask], x_grid, y_grid
         )
-        return torch.clamp(source_core + plume_tail, min=0.0, max=1.0)
-
-    ages = torch.linspace(
-        min_age,
-        max_age,
-        steps=lag_steps,
-        dtype=xyt.dtype,
-        device=xyt.device,
-    )
-    t = xyt[:, 2:3]
-    if hasattr(model, "source_xy"):
-        xs, ys = model.source_xy(t)
-    else:
-        xs, ys = model.xs, model.ys
-
-    kernel_sum = torch.zeros_like(t)
-    weight_sum = torch.zeros_like(t)
-
-    for age in ages:
-        valid = (t >= age).to(xyt.dtype)
-        t_emit = torch.clamp(t - age, min=0.0)
-        u_emit, v_emit = _transport_wind_at(model, t_emit, u, v)
-        center_x = xs + transport_scale * u_emit * age
-        center_y = ys + transport_scale * v_emit * age
-        dx_age = xyt[:, 0:1] - center_x
-        dy_age = xyt[:, 1:2] - center_y
-
-        speed_emit = torch.sqrt(u_emit**2 + v_emit**2 + 1e-12)
-        ex = u_emit / speed_emit
-        ey = v_emit / speed_emit
-        along_age = dx_age * ex + dy_age * ey
-        cross_age = -dx_age * ey + dy_age * ex
-        age_root = torch.sqrt(age + 1e-6)
-        sigma_along = sigma_core_gate + along_spread * age_root
-        sigma_cross_eff = sigma_cross * (1.0 + cross_spread * age_root)
-        age_weight = torch.exp(-age / age_decay)
-        q_emit = model.Q(t_emit)
-        puff = (
-            torch.exp(-(along_age**2) / (2.0 * sigma_along**2))
-            * torch.exp(-(cross_age**2) / (2.0 * sigma_cross_eff**2))
-            * q_emit
-            * age_weight
-            * valid
+    for layer in torch.unique(idx_hi):
+        mask = idx_hi == layer
+        val_hi[mask] = _sample_grid_bilinear(
+            fields[layer], x_query[mask], y_query[mask], x_grid, y_grid
         )
-        kernel_sum = kernel_sum + puff
-        weight_sum = weight_sum + age_weight * valid
-
-    kernel = kernel_sum / torch.clamp(weight_sum, min=1e-6)
-    if source_core_weight > 0.0:
-        q_now = model.Q(t)
-        source_core = torch.exp(-(dx**2 + dy**2) / (2.0 * sigma_core_gate**2))
-        kernel = kernel + source_core_weight * source_core * q_now
-    return torch.clamp(kernel, min=0.0)
+    return (1.0 - alpha) * val_lo + alpha * val_hi
 
 
 def field_components(model, xyt, u, v, sigma_src):
-    bg = model.background(xyt[:, 2:3])
-    t = xyt[:, 2:3]
-    q_val = model.Q(t)
-    source_bias = model.source_bias()
-    if FIELD_MODE == "analytic_plume":
-        plume = analytic_plume_kernel(xyt, u, v, model, sigma_src)
-        gate = plume
-        source_term = (1.0 + source_bias) * plume
-        return bg, plume, q_val, gate, source_term
-
-    along, cross, _, _ = source_aligned_coords(xyt, u, v, model)
-    plume_features = torch.cat([torch.relu(along), cross, xyt[:, 2:3]], dim=1)
-    plume = model.plume_strength(plume_features)
-    gate = source_gate(xyt, u, v, model, sigma_src)
-    source_term = gate * (source_bias + plume) * q_val
-    return bg, plume, q_val, gate, source_term
+    q_val = model.Q(xyt[:, 2:3])
+    plume = recurrent_plume_value(model, xyt, sigma_src)
+    bg = torch.zeros_like(q_val)
+    return bg, plume, q_val, plume, plume
 
 
 def predict_concentration(model, xyt, u, v, sigma_src):
-    bg, plume, q_val, gate, source_term = field_components(model, xyt, u, v, sigma_src)
-    return concentration_from_components(bg, plume, q_val, source_term)
+    return recurrent_plume_value(model, xyt, sigma_src)
 
 
 def concentration_from_components(bg, plume, q_val, source_term):
-    if FIELD_MODE == "no_gate":
-        return bg + plume * q_val
-    if FIELD_MODE == "no_background":
-        return source_term
-    if FIELD_MODE == "minimal":
-        return plume * q_val
-    if FIELD_MODE == "analytic_plume":
-        return source_term
-    return bg + source_term
+    return source_term

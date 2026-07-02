@@ -1058,3 +1058,244 @@ Validation:
   - `scan_mode = "local"`
   - local confidence interpretation is present
   - local boundary warning triggers when the local best lies at the edge of the 500 m radius scan
+
+### 2026-06-29 Conversation Logging and Greeting Convention
+
+User requested two ongoing collaboration conventions:
+
+- At the start of every future conversation segment, Codex should say `Bonjour!`.
+- After each working conversation in this project, Codex should save the conversation summary, reasoning, inspected/changed files, validation, unresolved issues, and next steps into `project_status.md`.
+
+Operational note:
+
+- Treat `project_status.md` as the project-local conversation memory and keep appends concise, evidence-based, and useful for resuming work.
+
+### 2026-06-29 Fix Recent Leak Batch Extract Script Path
+
+User reported that running:
+
+- `.venv_clean\Scripts\python.exe scripts/run_recent_leak_source_inversions.py`
+
+failed on the first selected leak with:
+
+- `FileNotFoundError: scripts\extract_monitor_data.py`
+
+Cause:
+
+- `scripts/run_recent_leak_source_inversions.py` still hard-coded `EXTRACT_SCRIPT = SCRIPT_DIR / "extract_monitor_data.py"`.
+- The current SHSH JS extraction script is `scripts/extract_monitor_data_shsh_js.py`.
+
+Implemented:
+
+- Added `resolve_extract_script(output_folder)` in `scripts/run_recent_leak_source_inversions.py`.
+- For `OUTPUT_FOLDER = "shsh_js"`, the batch runner now prefers `scripts/extract_monitor_data_shsh_js.py`.
+- Kept fallbacks to `scripts/extract_monitor_data.py` and `data/extract_monitor_data.py`.
+- Improved the missing-script error to show all searched paths.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile scripts\run_recent_leak_source_inversions.py` passed.
+- Import/path check with `.venv_clean` resolved:
+  - `C:\Document\phd\SourceInverse\SourceInverse\scripts\extract_monitor_data_shsh_js.py`
+  - `exists=True`
+
+Next step:
+
+- Re-run the batch command. If it proceeds past extraction, the next likely issues to inspect are extraction log contents, PINN run logs, and result quality reports for each leak.
+
+### 2026-06-29 Review Latest Five Source-Inversion Results for PPT
+
+User asked Codex to inspect the five most recent source-inversion result folders under `result/` and prepare a simple presentation-style summary.
+
+Inspected latest five result folders by directory modification time:
+
+- `result/20260629_192914_一氧化氮(NO)`
+- `result/20260629_202633_硫化氢(H₂S)`
+- `result/20260629_201032_一氧化氮(NO)`
+- `result/20260629_200235_二氧化硫(SO₂)`
+- `result/20260629_194630_硫化氢(H₂S)`
+
+Files inspected in each folder:
+
+- `result_quality_report.json`
+- `station_peak_diagnostics.csv`
+- `q_time_series.csv`
+
+Main findings:
+
+- All five runs completed and produced source coordinates, local confidence landscape outputs, Q time series, station peak diagnostics, and GIF/plot artifacts.
+- All five quality reports had `is_reasonable = false`.
+- In all five runs, local landscape distance was `0.0 m`, meaning the local fixed-parameter source scan was consistent with the trained source; this does not prove the source estimate is final.
+- Main failure mode: the model often fits one dominant station peak very well but badly misses another high-value station peak in the same event window.
+- Several runs had Q saturation at upper/lower bounds and plume maxima above the warning threshold.
+
+Presentation guidance:
+
+- Describe the outputs as preliminary diagnostic source-inversion results, not final regulatory conclusions.
+- Emphasize that the current recurrent-PDE model can produce plausible single-source candidates and diagnostics, but the latest batch indicates multi-peak/multi-station events are not yet robustly explained by one source.
+- Use maps/GIFs plus the station peak diagnostics to show both the inferred candidate source and the uncertainty/limitations.
+
+### 2026-06-29 Expanded Per-Run PPT Interpretation
+
+User asked for more detail for each of the latest five source-inversion results.
+
+Additional inspection:
+
+- Re-read `result_quality_report.json`, `station_peak_diagnostics.csv`, and `q_time_series.csv` for each latest result.
+- Extracted event time windows, inferred source lat/lon, RMSE, warnings, Q statistics, plume maxima, local landscape consistency, and high-station peak fit behavior.
+
+Key per-run interpretation:
+
+- `20260629_192914_一氧化氮(NO)`: 2026-04-15 05:00-18:00. Candidate source near `(30.717272, 121.285623)`. Model fit the strongest `二工区南部园区站（抚佳）` peak almost exactly but missed `上石化边界卫二路站` and other elevated stations. RMSE high and plume factor excessive.
+- `20260629_202633_硫化氢(H₂S)`: 2026-04-14 08:00-20:00. Candidate source near `(30.712014, 121.297750)`. Model fit `上石化边界卫六路站` peak well but missed `二工区东北园区站(亚南)`. RMSE high and plume factor just above warning threshold.
+- `20260629_201032_一氧化氮(NO)`: 2026-04-14 08:00-20:00. Candidate source near `(30.712641, 121.296744)`. Model fit `上石化边界卫六路站` peak but missed the similarly large `二工区东北园区站(亚南)` peak. This is the clearest example that one-source explanation is insufficient or the current model is over-allocating the event to one plume branch.
+- `20260629_200235_二氧化硫(SO₂)`: 2026-04-15 04:00-16:00. Candidate source near `(30.725555, 121.283385)`. Q and plume values were comparatively small, but the main `上石化边界卫二路站` SO2 peak was not recovered. This result should be presented as low-confidence.
+- `20260629_194630_硫化氢(H₂S)`: 2026-04-15 04:00-16:00. Candidate source near `(30.717456, 121.286195)`. Model fit `二工区南部园区站（抚佳）` well but missed `上石化边界卫二路站`; similar single-branch fit pattern as the NO result on 2026-04-15.
+
+PPT conclusion:
+
+- The latest batch should be described as preliminary source-inversion diagnostics.
+- The candidate source points are internally stable under local landscape scans, but station-peak diagnostics show unresolved multi-peak/multi-station structure.
+- For sharing, clearly separate "candidate source indication" from "model quality/limitations".
+
+### 2026-06-30 PPT Design for Workspace Method Changes
+
+User asked Codex to inspect current workspace changes and propose 1-2 PPT pages comparing the old method with the new method, including what changed and what optimization effect it should provide.
+
+Inspected:
+
+- `git status --short`
+- `git diff --stat`
+- diffs for `pinn_source/config.py`, `pinn_source/field.py`, `pinn_source/pipeline.py`, `pinn_source/source_landscape.py`, `pinn_source/viz.py`, and `pinn_source/README.md`
+- existing project status notes about avoiding additional loss terms
+
+Observed workspace changes:
+
+- Main code change is a method-level refactor from the previous analytic/free-plume PINN path toward `FIELD_MODE = "recurrent_pde"`.
+- `config.py` was simplified from many loss/collocation/adaptive parameters to a smaller set centered on recurrent plume controls: `RECURRENT_GRID_NX`, `RECURRENT_GRID_NY`, `RECURRENT_SUBSTEPS`, `RECURRENT_SOURCE_SCALE`, `RECURRENT_DECAY`, and `RECURRENT_INITIAL_RELEASE_FRACTION`.
+- `field.py` replaces source-gate / analytic plume / historical puff logic with a gridded recurrent plume solver:
+  - source release on grid
+  - wind advection
+  - diffusion
+  - decay
+  - bilinear sampling back to station points
+- `pipeline.py` removes PDE collocation sampling, axis/source-local/top-station/multi-high/high-downwind auxiliary losses, staged PDE/data balancing, and adaptive loss weighting. Training now mainly uses data loss plus Q smooth/L2 regularization, while physical constraints are encoded in the forward plume simulation.
+- `adaptive_loss.py` is deleted.
+- `source_landscape.py` removes geometry-score terms from confidence landscape and scans data fit only, reducing semantic mixing between confidence and hand-designed geometry penalties.
+- `viz.py` now always renders predicted concentration, not gate-only diagnostic visualization.
+- `README.md` now describes recurrent PDE plume as the default model path.
+
+PPT recommendation:
+
+- Page 1: "Method upgrade: from loss-constrained PINN to physics-forward plume simulation", with old vs new pipeline comparison.
+- Page 2: "Expected optimization effect and current diagnostic interpretation", with benefits, evidence from latest batch, and limitations.
+
+Important caveat:
+
+- Latest five result runs still have `is_reasonable = false`; present the new method as a structural improvement toward physical plausibility and simpler objectives, not as a fully solved final model.
+
+### 2026-06-30 Generated Two-Slide Method-Update PPT
+
+User asked Codex to directly generate the 1-2 page PPT described above.
+
+Created:
+
+- `outputs/source_inverse_method_update.pptx`
+
+Slide structure:
+
+- Slide 1: `溯源模型方法升级`
+  - compares the old PINN/free-plume/multi-loss method with the new recurrent-PDE gridded plume method
+  - emphasizes the method shift from adding auxiliary losses to encoding physics in the forward model
+- Slide 2: `修改内容与优化效果`
+  - summarizes three main code/method changes:
+    - recurrent-PDE plume generation
+    - simplified training objective
+    - clearer diagnostics and local source landscape semantics
+  - includes expected effects and current diagnostic caveat that latest batch results are still preliminary
+
+Validation:
+
+- Rendered preview images for both slides and inspected visually.
+- Fixed initial text crowding on slide 1 and tightened slide 2 caveat text.
+- Imported the final PPTX with artifact-tool and confirmed:
+  - slide count: 2
+  - output file exists at `outputs/source_inverse_method_update.pptx`
+
+Notes:
+
+- The deck uses a restrained white/black/gray style with orange highlights.
+- It is intended as a concise method-change section for a technical PPT, not a full source-inversion results report.
+
+### 2026-06-30 Clarified Main Motivation for Method Upgrade
+
+User clarified the intended explanation for the method upgrade:
+
+- The main concern with the previous method was that plume inference was not temporally continuous enough.
+- Because the plume was generated more like independent time-slice fitting, its evolution did not fully match the physical expectation that pollutant mass should be released, transported by wind, diffused, and decayed continuously through time.
+
+Recommended framing:
+
+- Present the recurrent-PDE upgrade first as a fix for temporal continuity and physical plume evolution.
+- Present reduced loss complexity and reduced component compensation as secondary benefits.
+
+### 2026-06-30 Speaker Notes for Group Meeting Slides 2-3
+
+User provided `C:/Document/phd/SourceInverse/项目汇报/0630/0630组会汇报.pptx` and asked for speaker notes for slides 2 and 3.
+
+Inspected with artifact-tool:
+
+- Slide 2 title: `工作介绍`
+  - Covers source-position confidence interval, wind-field perturbation sensitivity analysis, and diagnostic/quality report analysis.
+- Slide 3 title: `详细进展`
+  - Focuses on local source-position confidence interval: local grid scan around trained source, loss contour/probability conversion, 50/80/95 confidence regions, and why local scan avoids misleading global boundary low-loss areas.
+
+Delivered:
+
+- A natural Chinese speaking script for slide 2 and slide 3, emphasizing motivation, method, and interpretation rather than reading slide text verbatim.
+
+### 2026-06-30 Regenerated Speaker Notes for Updated Slides 2-3
+
+User clarified that the PPT file had changed and asked to regenerate speaker notes for the updated version of `C:/Document/phd/SourceInverse/项目汇报/0630/0630组会汇报.pptx`.
+
+Re-inspected updated deck:
+
+- slide count changed to 18
+- Slide 2 title: `工作介绍——溯源模型方法升级`
+  - focuses on method-upgrade motivation: previous plume inference lacked explicit temporal continuous propagation
+  - compares old `PINN + 自由羽流网络 + 多辅助 loss` with new temporally continuous PDE gridded plume recurrence
+- Slide 3 title: `工作介绍——修改内容与优化效果`
+  - table comparing modification direction, concrete changes, and expected effects
+  - rows cover plume expression, loss function structure, source-confidence interpretation, visualization output, and diagnostic report
+
+Rendered slide previews:
+
+- `outputs/ppt_slide_previews/slide-2.png`
+- `outputs/ppt_slide_previews/slide-3.png`
+
+Delivered:
+
+- Regenerated Chinese speaker notes tailored to the updated slides 2 and 3.
+
+### 2026-07-02 Commit Message Draft for Workspace Changes
+
+User asked Codex to write a GitHub commit message for the current workspace changes.
+
+Inspected:
+
+- `git status --short`
+- `git diff --stat`
+- diffs for recurrent-PDE model files and related docs/visualization/source-landscape changes
+
+Current change summary:
+
+- Reworked source inversion from the previous analytic/free-plume path to `FIELD_MODE = "recurrent_pde"`.
+- Added gridded recurrent plume evolution with source release, advection, diffusion, decay, and station sampling.
+- Simplified the training objective to data fitting plus Q smooth/L2 regularization.
+- Removed adaptive loss and many auxiliary geometry/observation-shaping losses.
+- Simplified source landscape semantics and concentration visualization.
+- Updated README and project conversation/status notes.
+
+Delivered:
+
+- A concise commit subject and multi-line commit body suitable for GitHub.

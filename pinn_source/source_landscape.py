@@ -21,69 +21,6 @@ mpl.rcParams["font.sans-serif"] = [
 mpl.rcParams["axes.unicode_minus"] = False
 
 
-def _source_geometry_score(
-    xs,
-    ys,
-    obs_time_indices,
-    x_obs_flat,
-    y_obs_flat,
-    c_obs_flat,
-    u_w_t,
-    v_w_t,
-    axis_high_ratio,
-    axis_min_relief,
-    axis_along_margin,
-    axis_cross_base,
-    axis_cross_slope,
-    high_downwind_ratio,
-    high_downwind_min_relief,
-    high_downwind_margin,
-):
-    scores = []
-    for i, idx_t in enumerate(obs_time_indices):
-        if idx_t.numel() == 0:
-            continue
-
-        obs_slice = c_obs_flat[idx_t]
-        x_slice = x_obs_flat[idx_t]
-        y_slice = y_obs_flat[idx_t]
-        obs_max = torch.max(obs_slice)
-        obs_min = torch.min(obs_slice)
-        relief = (obs_max - obs_min) / torch.clamp(torch.abs(obs_max), min=1e-6)
-
-        u_i = u_w_t[i]
-        v_i = v_w_t[i]
-        w_norm = torch.sqrt(u_i**2 + v_i**2 + 1e-12)
-        w_x = u_i / w_norm
-        w_y = v_i / w_norm
-
-        if float(relief.item()) >= high_downwind_min_relief:
-            high_mask = obs_slice >= (high_downwind_ratio * obs_max)
-            if torch.any(high_mask):
-                dx_high = x_slice[high_mask] - xs
-                dy_high = y_slice[high_mask] - ys
-                dot_high = dx_high * w_x + dy_high * w_y
-                high_weight = torch.relu(obs_slice[high_mask]) / torch.clamp(obs_max, min=1e-6)
-                scores.append(torch.mean(high_weight * torch.relu(high_downwind_margin - dot_high)))
-
-        if float(relief.item()) >= axis_min_relief:
-            high_mask = obs_slice >= (axis_high_ratio * obs_max)
-            if torch.any(high_mask):
-                dx_high = x_slice[high_mask] - xs
-                dy_high = y_slice[high_mask] - ys
-                along_high = dx_high * w_x + dy_high * w_y
-                cross_high = torch.abs(-dx_high * w_y + dy_high * w_x)
-                high_weight = torch.relu(obs_slice[high_mask]) / torch.clamp(obs_max, min=1e-6)
-                corridor_half_width = axis_cross_base + axis_cross_slope * torch.relu(along_high)
-                forward_penalty = torch.relu(axis_along_margin - along_high)
-                cross_penalty = torch.relu(cross_high - corridor_half_width)
-                scores.append(torch.mean(high_weight * (forward_penalty + cross_penalty)))
-
-    if not scores:
-        return xs * 0.0
-    return torch.mean(torch.stack(scores))
-
-
 def _confidence_thresholds(prob_grid, levels):
     flat = prob_grid.reshape(-1)
     order = np.argsort(flat)[::-1]
@@ -261,19 +198,11 @@ def compute_source_loss_landscape(
     v_obs_t,
     c_obs_t,
     data_weight_t,
-    obs_time_indices,
-    t_w_t,
-    u_w_t,
-    v_w_t,
-    x_obs_t,
-    y_obs_t,
     sigma_src,
     radius_m,
     step_m,
     temperature,
     levels,
-    include_geometry,
-    geometry_kwargs,
     x_bounds_m=None,
     y_bounds_m=None,
 ):
@@ -314,10 +243,6 @@ def compute_source_loss_landscape(
 
     model.eval()
     with torch.no_grad():
-        x_obs_flat = x_obs_t.view(-1)
-        y_obs_flat = y_obs_t.view(-1)
-        c_obs_flat = c_obs_t.view(-1)
-
         for iy, y_m in enumerate(ys_m):
             for x_m in xs_m:
                 x_norm = (float(x_m) - x0) / L
@@ -326,20 +251,6 @@ def compute_source_loss_landscape(
                 model.ys.data.fill_(y_norm)
                 c_pred = predict_concentration(model, xyt_obs, u_obs_t, v_obs_t, sigma_src)
                 data_loss = torch.mean(data_weight_t * ((c_pred - c_obs_t) ** 2))
-                geom_loss = torch.tensor(0.0, device=device)
-                if include_geometry:
-                    geom_loss = _source_geometry_score(
-                        model.xs,
-                        model.ys,
-                        obs_time_indices,
-                        x_obs_flat,
-                        y_obs_flat,
-                        c_obs_flat,
-                        u_w_t,
-                        v_w_t,
-                        **geometry_kwargs,
-                    )
-                total = data_loss + geom_loss
                 lon, lat = xy_to_latlon(float(x_m), float(y_m), lon0, lat0)
                 rows.append(
                     {
@@ -350,8 +261,7 @@ def compute_source_loss_landscape(
                         "lon": float(lon),
                         "lat": float(lat),
                         "data_loss": float(data_loss.item()),
-                        "geometry_loss": float(geom_loss.item()),
-                        "loss": float(total.item()),
+                        "loss": float(data_loss.item()),
                     }
                 )
             if (iy + 1) % 10 == 0 or (iy + 1) == len(ys_m):

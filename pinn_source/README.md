@@ -19,14 +19,17 @@ Edit paths and hyperparameters in:
 Key settings:
 - `SITE_PATH`, `CONC_PATH`, `WIND_PATH`
 - `WIND_DIR_IS_FROM`
-- `EPOCHS`, `LR`, `N_COLLOCATION`
+- `FIELD_MODE`
+- `EPOCHS`, `LR`
+- Recurrent plume controls such as `RECURRENT_GRID_NX`,
+  `RECURRENT_SUBSTEPS`, and `RECURRENT_INITIAL_RELEASE_FRACTION`
 
 ## Module Layout
 
 - `config.py` - Paths and hyperparameters
 - `geo_utils.py` - DMS parsing, lat/lon conversions
 - `data_io.py` - Data loading and wind conversion
-- `model.py` - PINN model definition
+- `models/` - PINN model definitions
 - `pipeline.py` - Training, filtering, and inference pipeline
 - `viz.py` - Plotting and diffusion animation
 - `pinn_source_pinn.py` - One-click entrypoint
@@ -34,8 +37,13 @@ Key settings:
 ## Notes
 
 - Wind direction uses meteorological convention when `WIND_DIR_IS_FROM = True`.
-- The pipeline filters out rows where `dir == 0` and any station concentration is 0/NaN.
-- Output includes estimated source location and a diffusion animation saved as `diffusion.gif`.
+- Zero concentration is treated as valid data; rows are dropped only when required
+  wind or station values are missing.
+- The default `FIELD_MODE = "recurrent_pde"` recursively advances a gridded plume
+  field through the observed wind sequence before sampling concentrations at
+  station locations.
+- Output includes copied input Excel files, source location, diagnostics,
+  station time-series plots, confidence plots, and `diffusion.gif`.
 
 ## Model Selection
 
