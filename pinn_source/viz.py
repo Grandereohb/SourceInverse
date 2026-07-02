@@ -3,9 +3,10 @@ import torch
 import matplotlib as mpl
 import pandas as pd
 from matplotlib import animation
+from matplotlib import colors as mcolors
 import matplotlib.pyplot as plt
 
-from geo_utils import xy_to_latlon
+from geo_utils import latlon_to_xy, xy_to_latlon
 from config import ADD_BASELINE_TO_VIZ
 from field import predict_concentration
 
@@ -36,6 +37,32 @@ def _needs_display_kernel(prob_grid):
         return False
     active_cells = int(np.sum(finite >= max_prob * 0.05))
     return max_prob >= 0.75 or active_cells <= 3
+
+
+def _diffusion_color_norm(frames):
+    all_vals = np.concatenate([np.asarray(f, dtype=float).ravel() for f in frames])
+    finite = all_vals[np.isfinite(all_vals)]
+    finite = finite[finite >= 0.0]
+    if finite.size == 0:
+        return mcolors.Normalize(vmin=0.0, vmax=1.0)
+
+    vmax = float(np.max(finite))
+    if vmax <= 0.0:
+        return mcolors.Normalize(vmin=0.0, vmax=1.0)
+
+    positive = finite[finite > 0.0]
+    if positive.size:
+        vmin = float(np.percentile(positive, 1.0))
+        vmin = max(0.0, min(vmin, vmax * 0.02))
+    else:
+        vmin = 0.0
+
+    if vmax <= vmin:
+        return mcolors.Normalize(vmin=0.0, vmax=max(vmax, 1.0))
+
+    # Gamma < 1 expands low/mid concentration differences while preserving
+    # the full high-value range, avoiding broad saturation in plume animations.
+    return mcolors.PowerNorm(gamma=0.45, vmin=vmin, vmax=vmax)
 
 
 def _smooth_probability_surface(lon_grid, lat_grid, prob_grid, upscale=45, sigma=1.4):
@@ -342,62 +369,78 @@ def diffusion_animation(
         cc = np.clip(cc, 0, None)  # for visualization
         frames.append(cc)
 
-    # robust color scale
-    all_vals = np.concatenate([f.ravel() for f in frames])
-    vmin = np.percentile(all_vals, 5)
-    vmax = np.percentile(all_vals, 95)
-    if vmin == vmax:
-        vmin, vmax = all_vals.min(), all_vals.max()
+    norm = _diffusion_color_norm(frames)
 
-    lon_min, lat_min = xy_to_latlon(x_min, y_min, lon0, lat0)
-    lon_max, lat_max = xy_to_latlon(x_max, y_max, lon0, lat0)
+    source_x_m, source_y_m = latlon_to_xy(pred_lon, pred_lat, lon0, lat0)
+    sites_xy = sites_plot.copy()
+    sites_xy[["x_plot", "y_plot"]] = sites_xy.apply(
+        lambda row: pd.Series(latlon_to_xy(row["lon"], row["lat"], lon0, lat0)),
+        axis=1,
+    )
 
-    # Ensure source is inside the view with a small padding
-    lon_min = min(lon_min, pred_lon)
-    lon_max = max(lon_max, pred_lon)
-    lat_min = min(lat_min, pred_lat)
-    lat_max = max(lat_max, pred_lat)
-    pad_lon = (lon_max - lon_min) * 0.05
-    pad_lat = (lat_max - lat_min) * 0.05
-    lon_min -= pad_lon
-    lon_max += pad_lon
-    lat_min -= pad_lat
-    lat_max += pad_lat
+    # Ensure source is inside the view with a small padding, in projected meters.
+    plot_x_min = min(float(x_min), float(source_x_m))
+    plot_x_max = max(float(x_max), float(source_x_m))
+    plot_y_min = min(float(y_min), float(source_y_m))
+    plot_y_max = max(float(y_max), float(source_y_m))
+    pad_x = max((plot_x_max - plot_x_min) * 0.05, 1.0)
+    pad_y = max((plot_y_max - plot_y_min) * 0.05, 1.0)
+    plot_x_min -= pad_x
+    plot_x_max += pad_x
+    plot_y_min -= pad_y
+    plot_y_max += pad_y
 
-    fig, ax = plt.subplots(figsize=(6, 6))
+    width_m = max(plot_x_max - plot_x_min, 1.0)
+    height_m = max(plot_y_max - plot_y_min, 1.0)
+    fig_width = 7.0
+    fig_height = min(max(fig_width * height_m / width_m, 4.2), 8.0)
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    cmap = plt.get_cmap("turbo").copy()
+    cmap.set_under("#f3f3f3")
     im = ax.imshow(
         frames[0],
         origin="lower",
-        extent=[lon_min, lon_max, lat_min, lat_max],
-        cmap="viridis",
-        aspect="auto",
-        vmin=vmin,
-        vmax=vmax,
+        extent=[x_min, x_max, y_min, y_max],
+        cmap=cmap,
+        aspect="equal",
+        norm=norm,
     )
     ax.scatter(
-        sites_plot["lon"],
-        sites_plot["lat"],
+        sites_xy["x_plot"],
+        sites_xy["y_plot"],
         c="white",
         s=20,
         edgecolors="black",
         label="Stations",
     )
-    for _, r in sites_plot.iterrows():
+    for _, r in sites_xy.iterrows():
         ax.text(
-            r["lon"],
-            r["lat"],
+            r["x_plot"],
+            r["y_plot"],
             str(r["station"]),
             fontsize=9,
             color="white",
             ha="left",
             va="bottom",
         )
-    ax.scatter(pred_lon, pred_lat, c="red", s=80, marker="*", label="Estimated Source")
-    ax.set_xlabel("Longitude")
-    ax.set_ylabel("Latitude")
+    ax.scatter(source_x_m, source_y_m, c="red", s=80, marker="*", label="Estimated Source")
+    ax.set_xlim(plot_x_min, plot_x_max)
+    ax.set_ylim(plot_y_min, plot_y_max)
+    ax.set_xlabel("X distance (m)")
+    ax.set_ylabel("Y distance (m)")
     ax.legend(loc="upper right")
-    cbar = fig.colorbar(im, ax=ax)
+    cbar = fig.colorbar(im, ax=ax, extend="max")
     cbar.set_label("Concentration")
+    if hasattr(norm, "vmax"):
+        cbar.ax.text(
+            0.5,
+            -0.08,
+            "Power-scaled colors",
+            ha="center",
+            va="top",
+            transform=cbar.ax.transAxes,
+            fontsize=8,
+        )
 
     def frame_fn(i):
         im.set_data(frames[i])

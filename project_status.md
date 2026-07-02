@@ -1299,3 +1299,39 @@ Current change summary:
 Delivered:
 
 - A concise commit subject and multi-line commit body suitable for GitHub.
+
+### 2026-07-02 Diffusion GIF Visualization Fix
+
+User reported two issues in current `diffusion.gif` outputs:
+
+- the horizontal/vertical coordinate ratio looked wrong, causing visual stretching
+- the concentration color range had poor contrast, with values around `50-500` appearing nearly the same color
+
+Inspected:
+
+- `pinn_source/viz.py`
+- latest result directories containing `diffusion.gif`
+- `pinn_source/config.py` diffusion settings
+
+Cause:
+
+- `diffusion_animation(...)` used longitude/latitude extents with `aspect="auto"`, so the image was stretched to fit the square figure rather than preserving physical distance ratios.
+- Color scaling used a linear 5th-95th percentile range, which could saturate high concentrations or compress mid/high concentration differences.
+
+Implemented in `pinn_source/viz.py`:
+
+- Added `_diffusion_color_norm(frames)` using `matplotlib.colors.PowerNorm(gamma=0.45)`.
+- Switched diffusion animation plotting to projected meter coordinates instead of lon/lat axes.
+- Set `aspect="equal"` so x/y distances are displayed without stretching.
+- Converted station and source lon/lat back into projected x/y coordinates for overlay.
+- Changed the color map to `turbo` and preserved the full high-value range while enhancing low/mid concentration contrast.
+- Added a small colorbar note: `Power-scaled colors`.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile pinn_source\viz.py pinn_source\pipeline.py` passed.
+- A direct `_diffusion_color_norm(...)` check showed `50`, `100`, `500`, and `1000` map to clearly separated normalized color values.
+
+Next step:
+
+- Re-run a source inversion to regenerate `diffusion.gif`; existing result GIFs remain unchanged because they were already rendered.
