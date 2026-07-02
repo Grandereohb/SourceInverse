@@ -1335,3 +1335,58 @@ Validation:
 Next step:
 
 - Re-run a source inversion to regenerate `diffusion.gif`; existing result GIFs remain unchanged because they were already rendered.
+
+### 2026-07-02 Analysis of Q(t) Variation Constraints
+
+User asked how the current source-strength `Q(t)` variation is constrained and noted that real sudden leaks can have large source strengths, so `Q(t)` should not necessarily be too smooth.
+
+Inspected:
+
+- `pinn_source/config.py`
+- `pinn_source/models/pinn.py`
+- `pinn_source/q_parameterization.py`
+- `pinn_source/pipeline.py`
+
+Findings:
+
+- Current default is `Q_MODE = "smooth_time"`.
+- `smooth_time` uses one learnable `logQ_time` control point per observed timestamp and linearly interpolates between timestamps.
+- `Q(t)` is clamped by `Q_MIN = 0.2` and `Q_MAX = 5.0`.
+- Current Q regularization penalizes both:
+  - first differences of `logQ_time`, discouraging large hour-to-hour jumps
+  - second differences of `logQ_time`, discouraging sharp curvature changes
+- Loss contribution is:
+  - `Q_SMOOTH_WEIGHT * q_smooth_loss`, currently `0.03`
+  - `Q_L2_WEIGHT * q_l2_loss`, currently `0.001`
+
+Interpretation:
+
+- For sudden leaks, the current first-difference penalty may discourage abrupt rise/fall in `Q(t)`.
+- The hard cap `Q_MAX = 5.0` may be an even stronger limitation when the event requires a larger source strength; once `Q(t)` is clamped, the model cannot express a stronger release through Q.
+- A better direction is likely to loosen Q amplitude and/or reduce first-difference smoothing rather than adding new observation-fitting losses.
+
+### 2026-07-02 Loosened Q(t) Constraints for Sudden Leak Events
+
+User confirmed applying the proposed Q(t) adjustment for sudden leak scenarios.
+
+Changed in `pinn_source/config.py`:
+
+- `Q_SMOOTH_WEIGHT`: `0.03 -> 0.01`
+- `Q_MAX`: `5.0 -> 20.0`
+- Kept `Q_L2_WEIGHT = 0.001`
+- Kept `Q_MIN = 0.2`
+- Kept `Q_MODE = "smooth_time"`
+
+Reasoning:
+
+- Real sudden leaks can produce large, fast source-strength changes.
+- The previous Q upper bound and smoothness penalty could suppress sharp event-like Q(t) peaks.
+- This change relaxes Q(t) amplitude and temporal smoothness without adding new observation-fitting loss terms.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile pinn_source\config.py pinn_source\models\pinn.py pinn_source\q_parameterization.py pinn_source\pipeline.py` passed.
+
+Next check:
+
+- Re-run source inversion and inspect `q_time_series.csv`, `station_peak_diagnostics.csv`, `training_diagnostics.csv`, and `diffusion.gif` to see whether Q(t) recovers sharper leak pulses without destabilizing plume morphology.

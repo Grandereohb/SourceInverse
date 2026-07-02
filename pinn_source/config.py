@@ -66,10 +66,10 @@ RECURRENT_INITIAL_RELEASE_FRACTION = 1.0
 # =========================
 Q_MODE = "smooth_time"  # "neural", "smooth_time", or "piecewise"
 Q_SEGMENT_LENGTH = 6
-Q_SMOOTH_WEIGHT = 0.03
+Q_SMOOTH_WEIGHT = 0.01
 Q_L2_WEIGHT = 0.001
 Q_MIN = 0.2
-Q_MAX = 5.0
+Q_MAX = 20.0
 
 # These remain for PINN model compatibility. They are frozen in recurrent_pde mode.
 PLUME_MAX = None
