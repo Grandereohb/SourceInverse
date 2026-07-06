@@ -1,12 +1,9 @@
 # =========================
 # Data Paths
 # =========================
-SITE_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh_js\sites.xlsx"
-CONC_PATH = (
-    r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh_js\concentration.xlsx"
-)
-WIND_PATH = r"C:\Document\phd\SourceInverse\SourceInverse\data\shsh_js\wind.xlsx"
-
+SITE_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/sites.xlsx'
+CONC_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/concentration.xlsx'
+WIND_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/wind.xlsx'
 # =========================
 # Model / Device
 # =========================
@@ -18,7 +15,7 @@ FIELD_MODE = "recurrent_pde"
 # Output
 # =========================
 OUTPUT_DIR = r"C:\Document\phd\SourceInverse\SourceInverse\result"
-TARGET_POLLUTANT = ""
+TARGET_POLLUTANT = '1-戊烯'
 MAKE_PLOTS = True
 
 # =========================
@@ -37,26 +34,29 @@ EPOCHS = 5000
 LR = 1e-3
 LOSS_W_DATA = 1.0
 MAX_GRAD_NORM = 10.0
-DEBUG_EVERY = 500
+DEBUG_EVERY = 1000
 
-EARLY_STOP_START = 1800
-EARLY_STOP_PATIENCE = 500
-EARLY_STOP_MIN_DELTA = 1e-4
+EARLY_STOP_START = 700
+EARLY_STOP_PATIENCE = 200
+EARLY_STOP_MIN_DELTA = 1.0
 
 # =========================
 # Domain / Source
 # =========================
 DOMAIN_PAD_M = 500.0
-SOURCE_POSITION_PAD_M = -300.0
+# Positive values allow source candidates outside the station envelope.
+SOURCE_POSITION_PAD_M = 500.0
+SOURCE_INIT_MODE = "max_station_upwind"  # "center" or "max_station_upwind"
+SOURCE_INIT_UPWIND_DISTANCE_M = 200.0
 SIGMA_SRC = 0.05
 D_MIN_PHYS = 500.0
 
 # =========================
 # Recurrent PDE Plume
 # =========================
-RECURRENT_GRID_NX = 56
-RECURRENT_GRID_NY = 56
-RECURRENT_SUBSTEPS = 2
+RECURRENT_GRID_NX = 36
+RECURRENT_GRID_NY = 36
+RECURRENT_SUBSTEPS = 1
 RECURRENT_SOURCE_SCALE = 1.0
 RECURRENT_DECAY = 0.15
 RECURRENT_INITIAL_RELEASE_FRACTION = 1.0
@@ -101,9 +101,31 @@ EVENT_TIME_WEIGHT = 3.0
 EVENT_PEAK_WEIGHT = 3.0
 EVENT_PEAK_RATIO = 0.6
 
+# Residual Focal Loss is kept for optional rollback, but raw worst-residual loss
+# is now the primary way to prevent severe misses from being averaged away.
+RESIDUAL_FOCAL_WEIGHT = 0.0
+RESIDUAL_FOCAL_POWER = 1.0
+RESIDUAL_FOCAL_SCALE = 1.0
+RESIDUAL_FOCAL_MAX_WEIGHT = 20.0
+
+RAW_RESIDUAL_BASE_WEIGHT = 1.0
+RAW_RESIDUAL_WORST_WEIGHT = 0.5
+
 # Debug-only multi-station peak counters.
 MULTI_HIGH_RATIO = 0.5
 MULTI_HIGH_MIN_RELIEF = 0.15
+
+# =========================
+# Diagnostics / Ablation
+# =========================
+SINGLE_STATION_DOMINANCE_RATIO = 0.8
+SINGLE_STATION_PEAK_MISS_RATIO = 0.2
+SINGLE_STATION_PEAK_TIME_TOL_H = 6.0
+
+ENABLE_STATION_ABLATION = False
+ABLATION_TARGET_STATION = "上石化边界卫三路站"
+ABLATION_NEIGHBOR_RADIUS_M = 2500.0
+ABLATION_MAX_NEIGHBORS = 4
 
 # =========================
 # Source Confidence / Plots
@@ -116,6 +138,6 @@ SOURCE_LANDSCAPE_TEMPERATURE = 0.1
 SOURCE_LANDSCAPE_LEVELS = [0.5, 0.8, 0.95]
 
 DIFFUSION_N_FRAMES = 24
-DIFFUSION_NX = 80
-DIFFUSION_NY = 80
+DIFFUSION_NX = 140
+DIFFUSION_NY = 140
 ADD_BASELINE_TO_VIZ = True

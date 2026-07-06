@@ -1390,3 +1390,945 @@ Validation:
 Next check:
 
 - Re-run source inversion and inspect `q_time_series.csv`, `station_peak_diagnostics.csv`, `training_diagnostics.csv`, and `diffusion.gif` to see whether Q(t) recovers sharper leak pulses without destabilizing plume morphology.
+
+### 2026-07-02 Training Speed Tuning
+
+User reported that recurrent PDE source-inversion training is slow.
+
+Changed in `pinn_source/config.py`:
+
+- `EPOCHS`: `5000 -> 3500`
+- `DEBUG_EVERY`: `500 -> 1000`
+- `EARLY_STOP_START`: `1800 -> 1200`
+- `EARLY_STOP_PATIENCE`: `500 -> 300`
+- `EARLY_STOP_MIN_DELTA`: `1e-4 -> 5e-4`
+- `RECURRENT_GRID_NX`: `56 -> 44`
+- `RECURRENT_GRID_NY`: `56 -> 44`
+- `DIFFUSION_N_FRAMES`: `24 -> 20`
+- `DIFFUSION_NX`: `80 -> 72`
+- `DIFFUSION_NY`: `80 -> 72`
+
+Reasoning:
+
+- The recurrent PDE mode recomputes a gridded time-evolving plume during training; cost scales strongly with grid-cell count and epoch count.
+- Reducing the recurrent grid from `56x56` to `44x44` keeps the same physical model but lowers per-epoch field computation.
+- Recent training diagnostics showed late epochs were producing small improvements, so the default epoch budget and early stopping window were tightened.
+- Visualization grid/frame counts were also reduced slightly to shorten end-of-run rendering.
+- `RECURRENT_SUBSTEPS` was kept at `2` for now to avoid changing the temporal integration behavior too aggressively.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile pinn_source\config.py pinn_source\pipeline.py pinn_source\field.py pinn_source\viz.py` passed.
+
+Next check:
+
+- Re-run one recent leak inversion and compare runtime, `fit_raw_rmse`, source location, `q_time_series.csv`, and `diffusion.gif` against the previous 56x56 / 5000-epoch baseline.
+- If training is still too slow and quality remains acceptable, the next speed lever is testing `RECURRENT_SUBSTEPS = 1` as an explicit ablation.
+
+### 2026-07-02 Workflow Preference for Algorithm Changes
+
+User clarified a workflow preference:
+
+- For future algorithm-level changes, first explain the proposed modification ideas.
+- Provide multiple possible options when appropriate, including trade-offs.
+- Wait for user confirmation before editing code.
+- This applies especially to loss design, model structure, training strategy, source parameterization, physical constraints, and other method-level changes.
+
+### 2026-07-02 Explainability and Confidence Discussion
+
+User asked how to present or validate explainability for source-inversion results, especially how to tell stakeholders the basis and confidence of inferred leak sources.
+
+Suggested framing:
+
+- Explainability should answer two questions:
+  - Why did the model infer this source location and release period?
+  - How confident or stable is this result?
+- Possible evidence types:
+  - observation fit: predicted vs observed concentration curves at monitoring stations
+  - plume consistency: whether simulated plume transport aligns with wind direction and high-value station sequence
+  - source landscape: local score map around candidate source locations showing whether the selected source is a clear optimum or one of many similar candidates
+  - station contribution: which stations and peak periods most strongly support the inferred source
+  - uncertainty/stability: rerun or perturb inputs to see whether source location and Q(t) remain stable
+  - physical plausibility: wind, diffusion plume, source strength time series, and monitoring peaks should be mutually consistent
+
+Recommended PPT wording:
+
+- The source-inversion result is not presented as a black-box coordinate, but as a combined evidence chain of concentration fit, wind-driven plume consistency, source-location score landscape, and stability checks.
+- Confidence can be summarized by fit error, geometry/source score, source landscape concentration, and repeatability under parameter or data perturbations.
+
+### 2026-07-02 Pollutant Name Filter for Recent Leak Batch Runs
+
+User requested a field parameter for `scripts/run_recent_leak_source_inversions.py` so batch source-inversion traversal only selects leak events whose `pollutant` name contains the specified text.
+
+Changed in `scripts/run_recent_leak_source_inversions.py`:
+
+- Added manual default `POLLUTANT_CONTAINS = ""`.
+- Added `pollutant_contains` parameter to `select_leaks(...)` and `run_recent_leak_source_inversions(...)`.
+- Added CLI argument `--pollutant-contains`.
+- Applied the pollutant-name filter after time/direction filtering and before `start_rank`, so rank/count are based on the filtered leak-event list.
+- Added `pollutant_contains` to `run_summary.xlsx` rows for traceability.
+
+Example:
+
+```powershell
+.venv_clean\Scripts\python.exe scripts\run_recent_leak_source_inversions.py --count 5 --pollutant-contains "硫化氢"
+```
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile scripts\run_recent_leak_source_inversions.py` passed.
+- `--help` shows the new `--pollutant-contains` argument.
+
+### 2026-07-02 Stop Generating `recent_leak_runs_*` Folders
+
+User requested that folders like `result/recent_leak_runs_20260702_160740` should no longer be generated by `scripts/run_recent_leak_source_inversions.py`.
+
+Changed in `scripts/run_recent_leak_source_inversions.py`:
+
+- Removed creation of `result/recent_leak_runs_<timestamp>/` batch folders.
+- Replaced folder-level `run_summary.xlsx` with a single file under `result/`:
+  - `recent_leak_run_summary_<timestamp>.xlsx`
+- Used `tempfile.TemporaryDirectory(...)` for intermediate extraction/PINN logs.
+- Kept final logs behavior: `extract_monitor_data.log` and `pinn_source_pinn.log` are still moved into each generated PINN result directory.
+- Updated final console message from `Saved run logs and summary: ...` to `Saved run summary: ...`.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile scripts\run_recent_leak_source_inversions.py` passed.
+- `--help` still works and shows existing CLI arguments.
+
+Note:
+
+- The current manual default `POLLUTANT_CONTAINS` in the script is `"苯"`; this was left unchanged.
+
+### 2026-07-02 Analysis of `result/20260702_165910_苯` Missing Weisan Road Peak
+
+User asked why the benzene source-inversion result almost ignored the high values at `上石化边界卫三路站` and appeared to fit other stations instead.
+
+Findings from result files:
+
+- Input concentration shows a single-station dominant event:
+  - `上石化边界卫三路站` has residual peaks up to about `1833.64` after median baseline subtraction.
+  - Other stations are mostly around `0-6` raw concentration.
+  - Residual squared sum is dominated by `上石化边界卫三路站` (`~1.92e7`), while all other stations combined are negligible by comparison.
+- `station_peak_diagnostics.csv` confirms a severe miss:
+  - Weisan observed raw peak: `1834.45`
+  - prediction at observed peak: `0.81`
+  - peak fit ratio is nearly zero
+  - station RMSE is about `786.86`
+- The inferred source is about `3.4 km` away from Weisan Road station.
+- Local source landscape best point lies on the local scan boundary, indicating unstable/unfinished local optimum rather than a trustworthy concentrated source region.
+- The current source-position setting `SOURCE_POSITION_PAD_M = -300` shrinks the source search region inward by 300 m from station bounds.
+  - Weisan is near the east/south boundary of the station network.
+  - This can exclude physically plausible upwind source locations outside or near the boundary around Weisan.
+- During the main high-value period, wind direction changes sharply. For many early high hours, an upwind source for Weisan would likely be outside the current station-bounded source domain.
+
+Interpretation:
+
+- This is likely a boundary single-station event that current single-source recurrent PDE setup cannot express well under the current source domain and plume smoothness/transport constraints.
+- The model is not truly fitting the Weisan high point; it settles into a low-loss compromise that produces small plume signals at other stations while leaving the dominant peak unexplained.
+- This result should be marked low-confidence/unreasonable for stakeholder reporting.
+
+Candidate follow-up directions, pending user confirmation before code edits:
+
+1. Expand or relax source-position domain for boundary events, e.g. change `SOURCE_POSITION_PAD_M` from inward shrinkage to outward padding.
+2. Add a single-station event diagnostic / confidence flag that marks results unreliable when one station dominates and the peak miss ratio is near zero.
+3. Try a Weisan-focused ablation run: restrict fitting to event station plus physically nearby/downwind stations to check whether a plausible plume can explain the peak.
+4. Add optional station/event weighting changes only after confirming that domain and physical constraints are not the main cause.
+
+### 2026-07-02 PPT Summary Request: Algorithm Features and Improvements
+
+User asked for a one-slide summary of the current source-inversion algorithm, focusing on algorithm characteristics, advantages, what was improved, and which problems were solved.
+
+Suggested PPT structure:
+
+- Title: 时序物理约束溯源算法升级
+- Core message: from static/fragmented plume inference to recurrent PDE plume simulation with temporal continuity, event-aware fitting, and confidence diagnostics.
+- Compare improvement points:
+  - recurrent plume transport: improves physical continuity of plume evolution
+  - smooth time-varying Q(t): supports changing leak strength without forcing constant source intensity
+  - residual/event-window training: focuses on abnormal increments instead of background noise
+  - high-value/event weighting: strengthens fitting of abnormal periods and key stations
+  - source confidence landscape and diagnostics: explains why the source was selected and whether the result is trustworthy
+  - visualization optimization: improves plume readability and stakeholder communication
+
+### 2026-07-03 Algorithm Optimization: Boundary Sources, Low-Confidence Diagnostics, and Station Ablation
+
+User confirmed implementing three optimization directions:
+
+1. Expand source-position search range, especially allowing sources outside boundary stations.
+2. Add low-confidence diagnostics for single-station dominant events and badly missed peaks.
+3. Add a local ablation workflow for `上石化边界卫三路站` using the target station and nearby related stations.
+
+Changed in `pinn_source/config.py`:
+
+- `SOURCE_POSITION_PAD_M`: `-300.0 -> 800.0`
+  - Positive values now allow source candidates outside the station envelope.
+  - This targets boundary-station events where the true upwind source may lie outside the monitoring network.
+- Added diagnostics thresholds:
+  - `SINGLE_STATION_DOMINANCE_RATIO = 0.8`
+  - `SINGLE_STATION_PEAK_MISS_RATIO = 0.2`
+  - `SINGLE_STATION_PEAK_TIME_TOL_H = 6.0`
+- Added station ablation defaults:
+  - `ENABLE_STATION_ABLATION = False`
+  - `ABLATION_TARGET_STATION = "上石化边界卫三路站"`
+  - `ABLATION_NEIGHBOR_RADIUS_M = 2500.0`
+  - `ABLATION_MAX_NEIGHBORS = 4`
+
+Changed in `pinn_source/pipeline.py`:
+
+- Added `_select_ablation_stations(...)`.
+- Added optional station ablation before constructing the training observation matrix.
+- Added environment-variable overrides so ablation can be run temporarily without editing config:
+  - `PINN_ENABLE_STATION_ABLATION=1`
+  - `PINN_ABLATION_TARGET_STATION=上石化边界卫三路站`
+  - `PINN_ABLATION_NEIGHBOR_RADIUS_M=3500`
+  - `PINN_ABLATION_MAX_NEIGHBORS=4`
+- Added `station_ablation` metadata to `result_quality_report.json`.
+- Added `quality_diagnostics.dominant_station` to `result_quality_report.json`.
+- Added warning when a single station dominates residual energy and its peak is badly missed:
+  - `single-station dominant event peak is badly missed; source result is low confidence`
+
+Ablation station-selection checks:
+
+- With radius `2500 m`, Weisan ablation selects:
+  - `上石化边界卫三路站`
+  - `上石化园区卫四路站`
+- With radius `3500 m`, Weisan ablation selects:
+  - `上石化边界卫二路站`
+  - `上石化边界卫三路站`
+  - `上石化园区卫四路站`
+  - `上石化边界卫六路站`
+
+Suggested full ablation run command:
+
+```powershell
+$env:PINN_ENABLE_STATION_ABLATION='1'
+$env:PINN_ABLATION_TARGET_STATION='上石化边界卫三路站'
+$env:PINN_ABLATION_NEIGHBOR_RADIUS_M='3500'
+$env:PINN_ABLATION_MAX_NEIGHBORS='4'
+.venv_clean\Scripts\python.exe pinn_source\pinn_source_pinn.py
+```
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile pinn_source\config.py pinn_source\pipeline.py pinn_source\pinn_source_pinn.py` passed.
+- Lightweight ablation station-selection scripts passed for `2500 m` and `3500 m` radii.
+
+Note:
+
+- Full ablation training was not launched automatically in this turn because it can take a long time; the command above runs it explicitly.
+
+### 2026-07-05 Discussion: Strengthen Data-Fit Loss for Badly Missed Stations
+
+User asked whether the data-fitting loss can be modified so stations with large prediction-observation deviations have a stronger effect on loss instead of being averaged out by other stations.
+
+Initial response should follow the user's algorithm-change workflow preference: first discuss options and trade-offs, then wait for confirmation before editing code.
+
+Candidate directions:
+
+1. Residual-amplified data loss:
+   - Replace or augment MSE with residual-dependent weights, e.g. larger absolute residual gets larger weight.
+   - Helps badly missed high-value stations influence gradients more strongly.
+   - Risk: may chase sensor outliers or single-station artifacts too aggressively.
+
+2. Station-balanced loss:
+   - Compute loss per station first, then average across stations instead of averaging all observation points directly.
+   - Prevents stations with more normal/low-value samples from diluting a badly missed station.
+   - Good default structural improvement with moderate risk.
+
+3. Top-k / worst-station auxiliary data term:
+   - Add a term based on the worst station or worst top-k station losses.
+   - Directly prevents one severely missed station from being ignored.
+   - Risk: more aggressive and can overfit a bad station if used too strongly.
+
+4. Huber/log-cosh is not preferred for this case because it softens very large residuals; the user wants large misses to matter more, not less.
+
+Recommended path:
+
+- Start with station-balanced MSE plus a mild worst-station/top-k station term.
+- Keep weights configurable and conservative.
+- Do not add more physics/objective terms beyond data-fit restructuring.
+
+### 2026-07-05 Correction: Data Loss Should Amplify Large Residuals
+
+User correctly pointed out that station-balanced averaging may be equivalent to global averaging when stations have similar time counts, so it does not truly amplify high-value deviation.
+
+Updated thinking:
+
+- The optimization should target computation methods that make large residuals contribute disproportionately more to the data-fit loss.
+- Better candidates:
+  - residual focal MSE: multiply squared error by a residual-dependent weight
+  - relative/normalized residual loss: emphasize missed high observations without letting absolute scale dominate completely
+  - top-k residual loss: add a term for the worst residual samples or worst peak samples
+  - asymmetric underprediction penalty: penalize pred << obs more than overprediction, useful for missed plume peaks
+  - peak-time loss: focus on high observed values and their predicted-at-obs-peak error
+- Avoid Huber/log-cosh for this specific goal because they reduce large-residual influence.
+
+Recommended next proposal:
+
+- Use base weighted MSE plus focal residual amplification and optional top-k high-residual term.
+- Keep it configurable and conservative to reduce outlier chasing.
+
+### 2026-07-05 Added Residual Focal Loss to Data-Fit Term
+
+User confirmed adding only Residual Focal Loss to make large prediction-observation deviations contribute more strongly to the data-fitting loss.
+
+Changed in `pinn_source/config.py`:
+
+- Added configurable focal-loss parameters:
+  - `RESIDUAL_FOCAL_WEIGHT = 1.0`
+  - `RESIDUAL_FOCAL_POWER = 1.0`
+  - `RESIDUAL_FOCAL_SCALE = 1.0`
+  - `RESIDUAL_FOCAL_MAX_WEIGHT = 20.0`
+
+Changed in `pinn_source/pipeline.py`:
+
+- Replaced the data-fit loss calculation from:
+
+```python
+loss_data = torch.mean(data_weight_t * (data_residual**2))
+```
+
+- To:
+
+```python
+residual_focal_weight = 1 + RESIDUAL_FOCAL_WEIGHT * abs(residual / scale) ** RESIDUAL_FOCAL_POWER
+loss_data = mean(data_weight_t * residual_focal_weight * residual**2)
+```
+
+- Focal weights are capped by `RESIDUAL_FOCAL_MAX_WEIGHT` to reduce extreme instability.
+- Added `residual_focal_weight_mean` and `residual_focal_weight_max` to `training_diagnostics.csv`.
+- Added focal weight summary to the 500-epoch console log.
+- Added focal loss configuration to `result_quality_report.json` under `model.residual_focal_loss`.
+
+Interpretation:
+
+- Small residuals remain close to normal MSE.
+- Large residuals receive larger weights, so badly missed high observations have stronger gradients and are less likely to be averaged away by many low-error points.
+- This change only modifies the data-fit term; no top-k, station-balanced loss, or extra physical loss was added.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile pinn_source\config.py pinn_source\pipeline.py` passed.
+- A small tensor sanity check confirmed focal weights increase with residual magnitude.
+
+Next check:
+
+- Re-run the problematic benzene / Weisan Road event and compare `station_peak_diagnostics.csv`, especially `pred_at_obs_peak_fit_ratio`, `rmse_fit`, and `residual_focal_weight_max`.
+
+### 2026-07-05 Training Slowdown Check After Recent Changes
+
+User reported that training is now very slow and asked whether recent changes caused it.
+
+Findings:
+
+- The latest active result directory `result/20260705_135411_苯` currently contains only copied input files (`sites.xlsx`, `concentration.xlsx`, `wind.xlsx`), so the run has not finished enough to write `training_diagnostics.csv`, `result_quality_report.json`, or `diffusion.gif`.
+- Active Python processes were found for `pinn_source/pinn_source_pinn.py`, started at `2026-07-05 13:54:08`.
+- GPU is active and the training process is listed by `nvidia-smi`; this does not look like a CPU-only fallback.
+- Current speed-related config remains the faster settings:
+  - `EPOCHS = 3500`
+  - `RECURRENT_GRID_NX = 44`
+  - `RECURRENT_GRID_NY = 44`
+  - `RECURRENT_SUBSTEPS = 2`
+  - `DEBUG_EVERY = 1000`
+  - `DIFFUSION_N_FRAMES = 20`, `DIFFUSION_NX = 72`, `DIFFUSION_NY = 72`
+- Recent Residual Focal Loss adds only observation-level vector operations (`abs`, `pow`, `clamp`, multiply), so it should not significantly increase per-epoch cost.
+- However, Residual Focal Loss can increase total runtime indirectly by changing the loss landscape and making early stopping trigger later or not at all.
+- Expanding `SOURCE_POSITION_PAD_M` from `-300` to `800` also does not add much per-epoch compute, but it expands the feasible source region and can make optimization take longer to stabilize.
+
+Likely interpretation:
+
+- Per-epoch speed is probably still dominated by recurrent PDE forward/backward, not the new focal loss.
+- The run may feel much slower because it may now continue closer to the full `3500` epochs instead of early-stopping around `1500` epochs.
+
+Recommended next actions:
+
+- Do not kill the current process unless the user wants to stop it.
+- If speed is more important for quick testing, reduce `EPOCHS` and early-stop patience for debug runs, or temporarily set `RESIDUAL_FOCAL_WEIGHT = 0.5` / `RESIDUAL_FOCAL_MAX_WEIGHT = 10.0`.
+- A useful code improvement would be to flush per-epoch timing to a live log file so long IDE-launched runs can be diagnosed before completion.
+
+### 2026-07-05 Terminal Log Review: Current Training Timing
+
+User pasted terminal log for `result/20260705_135411_苯` and asked to inspect it.
+
+Key timing from terminal log:
+
+- Epoch 500:
+  - `data_forward=0.335s`
+  - `obs_losses=0.002s`
+  - `backward=0.294s`
+  - `optimizer=0.001s`
+  - `epoch_total=0.651s`
+- Epoch 1000:
+  - `data_forward=0.405s`
+  - `obs_losses=0.002s`
+  - `backward=0.288s`
+  - `optimizer=0.001s`
+  - `epoch_total=0.700s`
+
+Interpretation:
+
+- Residual Focal Loss is not the direct speed bottleneck; its loss computation is included in `obs_losses`, which is only about `0.002s` per epoch.
+- Runtime is dominated by recurrent PDE plume computation and backpropagation:
+  - `data_forward` is roughly `0.33-0.41s`
+  - `backward` is roughly `0.29s`
+- At `0.65-0.70s/epoch`, a full `3500` epoch run would take roughly `38-41 minutes` before post-processing.
+- Current focal behavior is moderate:
+  - `focal_w_mean ~= 1.10`
+  - `focal_w_max ~= 3.42`
+  - It is not hitting the cap `20.0` and is not causing large per-epoch overhead.
+- Loss improvement from epoch 500 to 1000 is very small (`21.496431 -> 21.496077`), so early stopping may still stop around the post-1200 patience window, but not before `EARLY_STOP_START=1200`.
+
+Potential speed levers to discuss before editing:
+
+- Reduce `RECURRENT_SUBSTEPS` from `2` to `1` for test runs.
+- Reduce recurrent grid from `44x44` to `36x36` or `40x40`.
+- Lower debug/test training budget, e.g. `EPOCHS=1800`, `EARLY_STOP_START=700`, `EARLY_STOP_PATIENCE=200`.
+- Add timing columns to `training_diagnostics.csv` and/or a live timing log file.
+
+### 2026-07-05 Recurrent PDE Speed Parameter Update
+
+User asked to change the PDE forward recurrence and backpropagation parameters after terminal timing showed most time was spent in recurrent PDE `data_forward` and `backward`.
+
+Changed in `pinn_source/config.py`:
+
+- `RECURRENT_GRID_NX`: `44 -> 36`
+- `RECURRENT_GRID_NY`: `44 -> 36`
+- `RECURRENT_SUBSTEPS`: `2 -> 1`
+
+Reasoning:
+
+- Recurrent PDE training cost scales strongly with grid-cell count and substeps.
+- Approximate compute ratio relative to the previous settings:
+  - `(36 * 36 * 1) / (44 * 44 * 2) ~= 0.33`
+- This targets the dominant timing components shown in the terminal log:
+  - `data_forward ~= 0.335-0.405s`
+  - `backward ~= 0.288-0.294s`
+
+Expected effect:
+
+- Per-epoch PDE forward/backward should be substantially faster, potentially around 2-3x for the recurrent PDE portion.
+- Spatial plume detail and temporal integration fidelity may decrease, so compare source location, station peak fit, and `diffusion.gif` against the previous `44x44/substeps=2` run.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile pinn_source\config.py pinn_source\pipeline.py pinn_source\field.py` passed.
+
+Note:
+
+- An existing Python training process was still running when this change was made. It will keep using the old config loaded at process start; stop and restart training to use the new PDE parameters.
+
+### 2026-07-05 Check: Residual Focal Loss Effect on `20260705_135411_苯`
+
+User reported that the high-value station was still not fitted and asked whether the modified loss term took effect.
+
+Checked result directory `result/20260705_135411_苯`:
+
+- No `pinn_source_pinn.log` file exists because this run was launched directly from the terminal/IDE rather than through the batch script that redirects stdout to a log file.
+- `training_diagnostics.csv` confirms Residual Focal Loss was active:
+  - `residual_focal_weight_mean = 1.0990`
+  - `residual_focal_weight_max = 3.4220`
+- `result_quality_report.json` also records:
+  - `model.residual_focal_loss.weight = 1.0`
+  - `power = 1.0`
+  - `scale = 1.0`
+  - `max_weight = 20.0`
+- `station_peak_diagnostics.csv` shows the Weisan high peak is still completely missed:
+  - `obs_peak_fit = 1833.64`
+  - `pred_at_obs_peak_fit ~= 3.84e-16`
+  - `pred_at_obs_peak_fit_ratio ~= 2.10e-19`
+  - `peak_time_error_h = 16.0`
+  - `rmse_fit ~= 786.86`
+- `quality_diagnostics.dominant_station` confirms single-station dominance:
+  - residual energy ratio for Weisan is `0.9999967`
+  - `peak_missed = true`
+- Q(t) stayed small and smooth (`~0.82-0.87`), so the model did not respond by raising source strength.
+- Local source landscape best is again on the scan boundary, suggesting the learned source remains an unstable/local compromise.
+
+Interpretation:
+
+- Residual Focal Loss is implemented and active, but current settings are mild because the peak normalized residual is about `1833.64 / 757.085 ~= 2.42`, producing focal weight `1 + 2.42 ~= 3.42`.
+- This was not strong enough to change the solution.
+- More importantly, the plume contribution at Weisan is almost zero, so the issue may be physical reachability/source-position initialization/domain/wind-path related rather than purely loss-weighting.
+- A stronger focal setting could be tested, but if the model cannot create a plume path to Weisan, simply increasing residual weight may still fail or destabilize other stations.
+
+### 2026-07-05 Changed Data Loss to Raw-Scale Worst Residual Loss
+
+User confirmed replacing the previous normalized focal MSE behavior because the goal is to prevent high-value residuals from being averaged away. The user specifically wanted a single 1000-level fitting deviation to keep the overall data loss in a similar magnitude, rather than producing only a small loss increase.
+
+Changed in `pinn_source/config.py`:
+
+- Disabled Residual Focal Loss by default while keeping its parameters for rollback:
+  - `RESIDUAL_FOCAL_WEIGHT = 0.0`
+- Added raw-scale loss weights:
+  - `RAW_RESIDUAL_BASE_WEIGHT = 1.0`
+  - `RAW_RESIDUAL_WORST_WEIGHT = 0.5`
+
+Changed in `pinn_source/pipeline.py`:
+
+- Replaced normalized MSE/focal data loss as the primary objective with raw concentration scale loss:
+
+```python
+raw_abs_residual = abs(c_pred - c_obs_t) * c_scale
+weighted_raw_abs_residual = sqrt(data_weight_t) * raw_abs_residual
+raw_residual_base_loss = mean(weighted_raw_abs_residual)
+raw_residual_worst_loss = max(raw_abs_residual)
+loss_data = RAW_RESIDUAL_BASE_WEIGHT * raw_residual_base_loss + RAW_RESIDUAL_WORST_WEIGHT * raw_residual_worst_loss
+```
+
+- If `RESIDUAL_FOCAL_WEIGHT > 0`, it now optionally modifies the weighted raw MAE base term, but focal is disabled by default.
+- Added diagnostics to `training_diagnostics.csv`:
+  - `raw_residual_base_loss`
+  - `raw_residual_worst_loss`
+  - `raw_residual_worst_term`
+- Updated 500-epoch console output to include:
+  - `raw_base=...`
+  - `raw_worst=...`
+- Added `model.data_loss` settings to `result_quality_report.json`:
+  - mode: `raw_weighted_mae_plus_worst_residual`
+  - base/worst weights
+  - note that the base term uses `sqrt(data_weight_t)`
+
+Expected behavior:
+
+- A single raw residual of 1000 contributes at least `0.5 * 1000 = 500` through the worst-residual term, before adding the base raw MAE.
+- This directly addresses the problem where a 1000+ high-value miss was reduced to a small normalized/averaged loss.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile pinn_source\config.py pinn_source\pipeline.py` passed.
+- A small tensor sanity check with residuals `[0, 2, 5, 1000]` produced:
+  - base loss `251.75`
+  - worst residual `1000.0`
+  - total loss `751.75`
+
+Next check:
+
+- Re-run the benzene / Weisan Road case and inspect `raw_residual_worst_loss`, `raw_residual_worst_term`, `station_peak_diagnostics.csv`, and source movement.
+
+### 2026-07-05 Additional Training Speed Optimization
+
+User reported training is still too slow and asked to inspect the code carefully for more speedups.
+
+Implemented engineering speedups in `pinn_source/field.py`:
+
+- Cached recurrent grid mesh tensors in `configure_recurrent_context(...)`:
+  - `recurrent_x_mesh`
+  - `recurrent_y_mesh`
+  - `recurrent_x_mesh_flat`
+  - `recurrent_y_mesh_flat`
+- Reused cached mesh tensors in `_advect_field(...)` and `_source_grid(...)` instead of rebuilding `torch.meshgrid(...)` every recurrent step.
+- Added an exact-time fast path in `recurrent_plume_value(...)`:
+  - If observation times exactly match recurrent time-grid layers, sample only the matching layer.
+  - This avoids sampling both lower/upper time layers and interpolating when training observations are already on the recurrent grid.
+
+Implemented training-budget speedups in `pinn_source/config.py`:
+
+- `EPOCHS`: `3500 -> 2200`
+- `EARLY_STOP_START`: `1200 -> 700`
+- `EARLY_STOP_PATIENCE`: `300 -> 200`
+- `EARLY_STOP_MIN_DELTA`: `5e-4 -> 1.0`
+
+Reason for early-stop change:
+
+- The data loss was recently changed to raw concentration scale.
+- `EARLY_STOP_MIN_DELTA = 5e-4` was appropriate for small normalized losses but is too tiny for raw-scale losses, causing early stopping to trigger late.
+- `1.0` is now a more meaningful minimum improvement threshold in concentration-scale loss units.
+
+Existing speed settings retained:
+
+- `RECURRENT_GRID_NX = 36`
+- `RECURRENT_GRID_NY = 36`
+- `RECURRENT_SUBSTEPS = 1`
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile pinn_source\config.py pinn_source\field.py pinn_source\pipeline.py pinn_source\models\pinn.py` passed.
+- A lightweight recurrent plume forward/backward smoke test passed and produced nonzero gradients for `xs` and `ys`.
+
+Expected effect:
+
+- Mesh caching and exact-time sampling reduce repeated tensor construction and redundant observation sampling inside recurrent PDE training.
+- Shorter training budget and raw-scale early stopping should reduce total runtime, especially now that raw-scale data loss can make tiny normalized min-delta thresholds ineffective.
+
+### 2026-07-05 Source Initialization: Max-Anomaly Station Upwind 1000 m
+
+User requested changing the source initial position directly to about 1000 m upwind of the maximum-anomaly station, to avoid the source staying near the domain center and to avoid expensive multi-initialization runs.
+
+Changed in `pinn_source/config.py`:
+
+- Added:
+  - `SOURCE_INIT_MODE = "max_station_upwind"`
+  - `SOURCE_INIT_UPWIND_DISTANCE_M = 1000.0`
+
+Changed in `pinn_source/pipeline.py`:
+
+- Added `_compute_source_initial_position(...)`.
+- Before normalization, preserved physical observation station coordinates and smoothed physical wind vectors:
+  - `x_obs_p`, `y_obs_p`
+  - `u_obs_mps`, `v_obs_mps`
+- The initializer now:
+  - finds the observation point with maximum `c_obs` residual
+  - uses that station/time wind vector
+  - sets initial source to `station_position - downwind_unit_vector * 1000 m`
+  - clips the point to the configured source domain
+  - converts it back to normalized coordinates for `model.xs` and `model.ys`
+- After model creation, `model.xs` and `model.ys` are filled with this initial position before optimizer setup.
+- Printed source initialization summary at run start:
+  - mode, x/y meters, max observed fit value
+- Added source initialization metadata to `result_quality_report.json` under `source.initialization`.
+
+Reasoning:
+
+- Previous training started at normalized `(0, 0)`, near the domain center.
+- For a boundary high-value station such as Weisan Road, gradients from the missed station may be too weak to pull the source from the center to the physically plausible upwind region.
+- This change does not add extra training runs; it only changes the single-run initial source position.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile pinn_source\config.py pinn_source\pipeline.py` passed.
+- A small initializer sanity check confirmed that a point with northward wind is initialized 1000 m south/upwind of the max-anomaly station.
+
+Next check:
+
+- Re-run benzene / Weisan Road and confirm terminal output shows `Source initial position: mode=max_station_upwind`.
+- Inspect whether `raw_worst`, `pred_at_obs_peak_fit_ratio`, and source location improve relative to center initialization.
+
+### 2026-07-05 Diffusion GIF View Extent Optimization
+
+User reported that the diffusion GIF plume was not fully visible; the displayed plume/source was partly clipped near the plot boundary.
+
+Changed in `pinn_source/viz.py`:
+
+- `diffusion_animation(...)` now expands the actual grid used to compute frames, not just the axis limits.
+- The frame-computation extent now includes:
+  - original physical plotting domain
+  - estimated source point
+  - all station points
+  - 12% padding or at least 250 m padding
+- The `imshow(...)` extent now uses the expanded data extent, preventing the plume from being clipped when the source lies near or outside the original station/domain bounds.
+- Added plume-mask based extent detection across frames so high-concentration plume regions remain inside view.
+- Moved legend outside the main plot area above the axis to reduce overlap with stations and labels.
+
+Reasoning:
+
+- Previous code expanded `ax.set_xlim/ylim` to include the source, but the raster frame itself was still computed only over the original `[x_min, x_max, y_min, y_max]` extent.
+- If the source/plume was near the edge, the visible axis expanded but the image data remained clipped.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile pinn_source\viz.py pinn_source\pipeline.py` passed.
+
+Note:
+
+- Existing `diffusion.gif` files are already rendered and will not change automatically. Re-run the inversion or regenerate visualization to produce an updated GIF.
+
+### 2026-07-05 Diffusion GIF Boundary Stretch Artifact
+
+User reported that the lower part of the diffusion plume was abnormally stretched near the plot boundary.
+
+Analysis:
+
+- The visualization extent had been expanded beyond the recurrent PDE grid so the source and plume would not be clipped.
+- `field._sample_grid_bilinear(...)` clamps out-of-grid query points to the nearest grid boundary.
+- As a result, when the GIF queried concentration outside the valid PDE grid, boundary values were repeated outward, creating a fake vertical plume band.
+- This is a visualization artifact, not a physically valid plume shape.
+
+Changed in `pinn_source/viz.py`:
+
+- Added a valid PDE-domain mask for diffusion GIF frames.
+- Concentration values outside the model's actual `[x_min, x_max, y_min, y_max]` computational domain are now set to `NaN`.
+- The colormap renders those outside-domain cells as light gray, so missing concentration-field regions are truncated instead of extrapolated.
+- Plume extent detection now uses only finite, valid-domain values.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile pinn_source\viz.py` passed.
+
+### 2026-07-05 Plot Display Issue Check and Show Blocking Fix
+
+User reported that after the diffusion GIF visualization change, no images were displaying and asked whether the change was wrong.
+
+Findings:
+
+- Latest result directory `result/20260705_162053_苯` contains only copied inputs:
+  - `concentration.xlsx`
+  - `sites.xlsx`
+  - `wind.xlsx`
+- It has no `training_diagnostics.csv`, `station_timeseries.png`, `sites_source_confidence.png`, or `diffusion.gif`, so that run did not reach the plotting stage.
+- Previous full result directory `result/20260705_154258_苯` contains complete images, and `station_timeseries.png` / `sites_source_confidence.png` can be opened successfully.
+
+Changed in `pinn_source/viz.py`:
+
+- Replaced remaining `plt.show()` calls with `plt.show(block=True)` so plot windows explicitly block in script mode and are less likely to flash or disappear in IDE/PowerShell contexts.
+- Moved diffusion legend back inside the plot (`upper right`) to rule out the previous outside-legend layout as a display issue.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile pinn_source\viz.py pinn_source\pipeline.py` passed.
+
+Interpretation:
+
+- The empty latest result folder suggests the immediate no-image case was not caused by image files being blank; images were never generated for that run.
+- The show-blocking change should make interactive figure display more reliable once the run reaches the plotting stage.
+
+### 2026-07-05 Diffusion GIF Range and Resolution Increase
+
+User reported that the GIF plume near boundaries looked stretched/distorted and low-resolution, and asked to enlarge the visualization range and increase resolution.
+
+Changed in `pinn_source/config.py`:
+
+- `DIFFUSION_N_FRAMES = 24`
+- `DIFFUSION_NX = 140`
+- `DIFFUSION_NY = 140`
+
+Changed in `pinn_source/viz.py`:
+
+- Increased diffusion view padding from `12% / 250 m` to `22% / 600 m`.
+- Forced the diffusion computation/view extent to a square physical span after padding:
+  - keeps x/y physical scale consistent with `aspect="equal"`
+  - reduces edge distortion when the source or plume lies near a boundary
+- Increased figure size from `7.0` to `8.2` inches wide, with larger minimum height.
+- Kept `aspect="equal"` for physically correct x/y proportions.
+
+Expected effect:
+
+- GIF should show a wider area around the source/plume and stations.
+- Higher grid resolution should make the raster plume less blocky.
+- GIF generation will be slower and file size larger, but training speed is unaffected because this is post-processing only.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile pinn_source\config.py pinn_source\viz.py pinn_source\pipeline.py` passed.
+
+### 2026-07-05 JJJ May Abnormal High Monitor Extraction Script
+
+User requested a script equivalent to `scripts/extract_abnormal_high_monitor_data.py` for the JJJ May hourly station workbooks under:
+
+- `data/jjj/2026年03-04-05月小时数据/5月小时数据/`
+
+Difference from SHSH-JS data:
+
+- SHSH-JS stores all stations in one workbook with station sheets.
+- JJJ stores each station as a separate Excel workbook.
+- For each JJJ workbook, station monitor data is in sheet2.
+
+Changed:
+
+- Added `scripts/extract_abnormal_high_jjj_monitor_data.py`.
+
+Implementation notes:
+
+- Traverses all `.xls` / `.xlsx` files in the input directory.
+- Extracts station name from file name before `_站点监测数据_`.
+- Reads sheet2 by default using zero-based `--sheet-index 1`.
+- Automatically finds the real table header row containing `时间`, because the sheet has title/blank rows before the data table.
+- Uses the same numeric extraction, pollutant mean thresholding, minimum concentration threshold, skip-pollutant handling, and Excel output format as the SHSH-JS abnormal-high script.
+- Treats JJJ meteorological columns (`温度`, `湿度`, `气压`, `风速`, `风向`) as non-pollutant columns.
+
+Default output:
+
+- `data/abnormal_high_monitor_data/abnormal_high_jjj_may_monitor_data.xlsx`
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile scripts\extract_abnormal_high_jjj_monitor_data.py` passed.
+- Default run completed successfully:
+  - `abnormal_high_records`: 298 rows
+  - `pollutant_thresholds`: 141 rows
+
+### 2026-07-05 JJJ Abnormal Output Pollutant Unit Cleanup
+
+User requested removing units from the generated `pollutant` names.
+
+Changed in `scripts/extract_abnormal_high_jjj_monitor_data.py`:
+
+- Added `clean_pollutant_name_for_output(...)`.
+- When building the long monitor table, pollutant columns like `非甲烷总烃(μg/m³)` and `苯(μg/m³)` are now written as `非甲烷总烃` and `苯`.
+- The cleanup targets unit-like trailing parentheses only, so names such as `氮氧化物(NOx)` are not treated as unit suffixes.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile scripts\extract_abnormal_high_jjj_monitor_data.py` passed.
+- A temporary validation output confirmed:
+  - `abnormal_high_records`: 298 rows, 0 pollutant names containing unit markers.
+  - `pollutant_thresholds`: 141 rows, 0 pollutant names containing unit markers.
+
+Note:
+
+- The default output file was locked by another process during validation, so the overwrite run failed with `PermissionError`. Close the Excel file and rerun the script to update the default output in place.
+
+### 2026-07-06 JJJ Skip Pollutants Unitless Matching Fix
+
+User reported that `DEFAULT_SKIP_POLLUTANTS` in `scripts/extract_abnormal_high_jjj_monitor_data.py` did not filter `非甲烷总烃`.
+
+Cause:
+
+- JJJ source columns include units, e.g. `非甲烷总烃(μg/m³)`.
+- The skip list contains the unitless name `非甲烷总烃`.
+- The previous filter compared only normalized raw column names, so the unitless skip entry did not match the unit-bearing source column.
+
+Changed in `scripts/extract_abnormal_high_jjj_monitor_data.py`:
+
+- `pollutant_columns(...)` now compares both raw and unit-stripped names.
+- Skip entries are also normalized in both raw and unit-stripped forms.
+- This allows either `非甲烷总烃` or `非甲烷总烃(μg/m³)` to filter the source column.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile scripts\extract_abnormal_high_jjj_monitor_data.py` passed.
+- Temporary output `data/abnormal_high_monitor_data/abnormal_high_jjj_skip_check.xlsx` had:
+  - `abnormal_high_records`: 56 rows, `非甲烷总烃` hits = 0
+  - `pollutant_thresholds`: 140 rows, `非甲烷总烃` hits = 0
+
+### 2026-07-06 JJJ May Hourly Workbook Merge
+
+User requested combining the separate JJJ May station Excel files into one workbook, following the structure of the SHSH-JS standard-unit hourly workbook.
+
+Added:
+
+- `scripts/combine_jjj_hourly_monitor_workbooks.py`
+
+Generated:
+
+- `data/jjj/2026年03-04-05月小时数据/5月小时数据_标准单位_汇总.xlsx`
+
+Implementation:
+
+- Scans one station workbook per file under `data/jjj/2026年03-04-05月小时数据/5月小时数据/`.
+- Reads sheet2 by default.
+- Automatically finds the data header row containing `时间`.
+- Writes one sheet per station, named like `H1站点（装备制造区域点位）(带标识)`.
+- Converts source headers such as `苯(μg/m³)` into:
+  - column name: `苯`
+  - standard-unit row: `μg/m³`
+- Sorts station data by time ascending.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile scripts\combine_jjj_hourly_monitor_workbooks.py` passed.
+- Generated workbook validation:
+  - sheet count: 15
+  - first sheets include H1-H5 and K1-K3 station sheets
+  - first row is column names, second row contains `标准单位`, subsequent rows are hourly data.
+
+### 2026-07-06 Recent Leak Batch Input File Clarification
+
+User asked how `scripts/run_recent_leak_source_inversions.py` chooses an Excel file when `ABNORMAL_DIR` contains multiple workbooks, and suggested using a concrete Excel path instead.
+
+Cause:
+
+- The script had both `ABNORMAL_DIR` and `INPUT_FILE_PATH`.
+- `INPUT_FILE_PATH` looked like the intended concrete input, but the run function still called `latest_abnormal_file()` and selected the newest `.xlsx` under `ABNORMAL_DIR`.
+- This made the selected abnormal-event workbook implicit and potentially surprising.
+
+Changed in `scripts/run_recent_leak_source_inversions.py`:
+
+- `INPUT_FILE_PATH` now explicitly points to:
+  - `data/abnormal_high_monitor_data/abnormal_high_monitor_data_jjj_may.xlsx`
+- Removed the automatic latest-file selection from the run path.
+- `run_recent_leak_source_inversions(...)` now reads the concrete `input_file_path`.
+- Added CLI override:
+  - `--input-file <path>`
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile scripts\run_recent_leak_source_inversions.py` passed.
+- `--help` shows the new `--input-file` argument.
+- The default `INPUT_FILE_PATH` exists.
+
+### 2026-07-06 Recent Leak Batch JJJ Extract Input Fix
+
+User ran `scripts/run_recent_leak_source_inversions.py` for JJJ and hit:
+
+- `ValueError: Could not update INPUT_FILE_PATH in scripts/extract_monitor_data_jjj.py`
+
+Cause:
+
+- `run_recent_leak_source_inversions.py` always tried to update `INPUT_FILE_PATH` in the selected extraction script.
+- `extract_monitor_data_shsh_js.py` uses `INPUT_FILE_PATH` because it reads one workbook.
+- `extract_monitor_data_jjj.py` uses `MONITOR_DATA_DIR` because it reads one workbook per station from a directory.
+- Therefore the JJJ extractor has no `INPUT_FILE_PATH` assignment to update.
+
+Changed in `scripts/run_recent_leak_source_inversions.py`:
+
+- Added `MONITOR_INPUT_PATH` for the raw monitor data source:
+  - `data/jjj/2026年03-04-05月小时数据/5月小时数据`
+- Split script selection from extractor output location:
+  - `EXTRACT_SCRIPT_KEY = "jjj"`
+  - `EXTRACT_OUTPUT_FOLDER = ""`
+- `update_extract_monitor_inputs(...)` now updates either:
+  - `INPUT_FILE_PATH` for SHSH-JS style extractors, or
+  - `MONITOR_DATA_DIR` for JJJ style extractors.
+- The batch abnormal event workbook remains controlled by `INPUT_FILE_PATH`.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile scripts\run_recent_leak_source_inversions.py` passed.
+- Dry check confirmed current selected extractor is `scripts/extract_monitor_data_jjj.py`.
+- Dry check confirmed `MONITOR_DATA_DIR`, `START_TIME`, `END_TIME`, `TARGET_POLLUTANT`, `WIND_STATION_NAME`, and `OUTPUT_FOLDER` are all matchable in the JJJ extractor.
+
+### 2026-07-06 Recent Leak Result Suffix Pollutant Fix
+
+User reported that batch source-inversion result folders were always named with the pollutant suffix `苯`, regardless of the current leak pollutant.
+
+Cause:
+
+- Result folder suffix is created in `pinn_source/pipeline.py` from:
+  - `TARGET_POLLUTANT` stored in `concentration.xlsx`, or
+  - fallback `TARGET_POLLUTANT` from `pinn_source/config.py`.
+- The batch script updated and ran the JJJ extraction script, but it did not update `pinn_source/config.py`.
+- `pinn_source/config.py` still pointed to `data/shsh_js/sites.xlsx`, `data/shsh_js/concentration.xlsx`, and `data/shsh_js/wind.xlsx`.
+- Therefore PINN could keep reading stale SHSH-JS inputs whose target pollutant was `苯`.
+
+Changed in `scripts/run_recent_leak_source_inversions.py`:
+
+- Added `PINN_CONFIG`.
+- Added `resolved_extract_output_dir()` to locate the standard files generated by the selected extractor.
+- Added `update_pinn_config_inputs(leak)` and call it after extraction, before launching PINN.
+- Each batch event now updates:
+  - `SITE_PATH`
+  - `CONC_PATH`
+  - `WIND_PATH`
+  - `TARGET_POLLUTANT`
+- For current JJJ settings, PINN paths resolve to:
+  - `data/jjj/sites.xlsx`
+  - `data/jjj/concentration.xlsx`
+  - `data/jjj/wind.xlsx`
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile scripts\run_recent_leak_source_inversions.py` passed.
+- Dry check confirmed `SITE_PATH`, `CONC_PATH`, `WIND_PATH`, and `TARGET_POLLUTANT` in `pinn_source/config.py` are all matchable for replacement.
+- Dry leak selection confirmed the first events are `正丁烷`, `1-氯-甲基苄`, and `甲硫醇`, so suffixes should vary after rerun.
+
+### 2026-07-06 Recent Leak Batch Actual Input Refresh Fix
+
+User found that during each batch source-inversion task, the actual `sites.xlsx`, `concentration.xlsx`, and `wind.xlsx` used by PINN were still the same old inputs instead of changing with event time and pollutant.
+
+Findings:
+
+- JJJ extraction itself can update `data/jjj/concentration.xlsx`; a single extraction test for rank 1 produced:
+  - pollutant: `正丁烷`
+  - rows: 13
+  - `TARGET_POLLUTANT`: `正丁烷`
+- `pinn_source/config.py` had remained pointed at the old `data/shsh_js/...` files before the batch fix, so PINN could keep reading stale inputs.
+- `extract_monitor_data_jjj.py` can also write to a timestamp fallback folder if standard output files are locked, so assuming fixed `data/jjj/*.xlsx` paths is not robust.
+
+Changed in `scripts/run_recent_leak_source_inversions.py`:
+
+- Added `parse_extracted_input_paths(log_path)` to parse the actual paths printed by the extraction log:
+  - `Saved concentration file: ...`
+  - `Saved wind file: ...`
+  - `Saved sites file: ...`
+- After each extraction, the batch script now updates `pinn_source/config.py` using those actual parsed paths before launching PINN.
+- Added `site_path`, `concentration_path`, and `wind_path` columns to the batch summary Excel so each run records exactly which inputs PINN used.
+- `config.py` path writes now use POSIX-style `/` paths to avoid Windows backslash escape warnings.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile scripts\run_recent_leak_source_inversions.py pinn_source\config.py` passed.
+- Parsed-path smoke test confirmed all three extracted paths exist.
+- A single extraction-only test for the first event updated `data/jjj/concentration.xlsx` to `正丁烷`.
+- Updating `pinn_source/config.py` from the real selected leak preserved `TARGET_POLLUTANT = '正丁烷'`.

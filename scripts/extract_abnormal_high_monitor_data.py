@@ -35,6 +35,7 @@ DEFAULT_SKIP_POLLUTANTS: list[str] = [
     "硫化氢(H₂S)-参况",
     "二氧化氮(NO₂)-参况",
     "二氧化硫(SO₂)-参况",
+    "非甲烷总烃",
 ]
 
 TIME_COLUMN = "时间"

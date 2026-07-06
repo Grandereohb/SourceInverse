@@ -47,6 +47,15 @@ def configure_recurrent_context(
     model.recurrent_y_grid = torch.linspace(
         float(y_min), float(y_max), steps=ny, dtype=dtype, device=device
     )
+    yy, xx = torch.meshgrid(
+        model.recurrent_y_grid,
+        model.recurrent_x_grid,
+        indexing="ij",
+    )
+    model.recurrent_x_mesh = xx
+    model.recurrent_y_mesh = yy
+    model.recurrent_x_mesh_flat = xx.reshape(-1)
+    model.recurrent_y_mesh_flat = yy.reshape(-1)
     model.recurrent_times = torch.as_tensor(
         t_values, dtype=dtype, device=device
     ).view(-1)
@@ -96,10 +105,9 @@ def _sample_grid_bilinear(field, x_query, y_query, x_grid, y_grid):
     )
 
 
-def _advect_field(field, x_grid, y_grid, u, v, dt):
-    yy, xx = torch.meshgrid(y_grid, x_grid, indexing="ij")
-    x_back = xx.reshape(-1) - u * dt
-    y_back = yy.reshape(-1) - v * dt
+def _advect_field(field, x_grid, y_grid, x_mesh_flat, y_mesh_flat, u, v, dt):
+    x_back = x_mesh_flat - u * dt
+    y_back = y_mesh_flat - v * dt
     return _sample_grid_bilinear(field, x_back, y_back, x_grid, y_grid).view_as(field)
 
 
@@ -121,11 +129,10 @@ def _diffuse_field(field, x_grid, y_grid, diffusion, dt):
     return torch.clamp(field + diffusion_eff * dt * lap, min=0.0)
 
 
-def _source_grid(model, t_value, x_grid, y_grid, sigma_src):
-    yy, xx = torch.meshgrid(y_grid, x_grid, indexing="ij")
+def _source_grid(model, t_value, x_grid, y_grid, x_mesh, y_mesh, sigma_src):
     xs, ys = model.source_xy(t_value.view(1, 1))
     sigma = max(float(sigma_src), 1e-4)
-    src = torch.exp(-((xx - xs) ** 2 + (yy - ys) ** 2) / (2.0 * sigma**2))
+    src = torch.exp(-((x_mesh - xs) ** 2 + (y_mesh - ys) ** 2) / (2.0 * sigma**2))
     dx = torch.clamp(x_grid[1] - x_grid[0], min=1e-8)
     dy = torch.clamp(y_grid[1] - y_grid[0], min=1e-8)
     mass = torch.clamp(torch.sum(src) * dx * dy, min=1e-8)
@@ -138,6 +145,8 @@ def _advance_recurrent_step(
     q_value,
     x_grid,
     y_grid,
+    x_mesh_flat,
+    y_mesh_flat,
     u_value,
     v_value,
     diffusion,
@@ -146,7 +155,16 @@ def _advance_recurrent_step(
     dt,
 ):
     field = field + source_scale * q_value * source * dt
-    field = _advect_field(field, x_grid, y_grid, u_value, v_value, dt)
+    field = _advect_field(
+        field,
+        x_grid,
+        y_grid,
+        x_mesh_flat,
+        y_mesh_flat,
+        u_value,
+        v_value,
+        dt,
+    )
     field = _diffuse_field(field, x_grid, y_grid, diffusion, dt)
     if decay > 0.0:
         field = field * torch.exp(-dt * decay)
@@ -159,6 +177,14 @@ def recurrent_plume_fields(model, sigma_src):
 
     x_grid = model.recurrent_x_grid.to(device=model.xs.device, dtype=model.xs.dtype)
     y_grid = model.recurrent_y_grid.to(device=model.xs.device, dtype=model.xs.dtype)
+    x_mesh = model.recurrent_x_mesh.to(device=model.xs.device, dtype=model.xs.dtype)
+    y_mesh = model.recurrent_y_mesh.to(device=model.xs.device, dtype=model.xs.dtype)
+    x_mesh_flat = model.recurrent_x_mesh_flat.to(
+        device=model.xs.device, dtype=model.xs.dtype
+    )
+    y_mesh_flat = model.recurrent_y_mesh_flat.to(
+        device=model.xs.device, dtype=model.xs.dtype
+    )
     t_values = model.recurrent_times.to(device=model.xs.device, dtype=model.xs.dtype)
     u_values = model.recurrent_u.to(device=model.xs.device, dtype=model.xs.dtype)
     v_values = model.recurrent_v.to(device=model.xs.device, dtype=model.xs.dtype)
@@ -176,7 +202,9 @@ def recurrent_plume_fields(model, sigma_src):
     source_scale = float(RECURRENT_SOURCE_SCALE)
 
     if t_values.numel() == 1:
-        source = _source_grid(model, t_values[0], x_grid, y_grid, sigma_src)
+        source = _source_grid(
+            model, t_values[0], x_grid, y_grid, x_mesh, y_mesh, sigma_src
+        )
         field = field + source_scale * model.Q(t_values[0].view(1, 1)).view(()) * source
         fields.append(field)
         return torch.stack(fields, dim=0)
@@ -187,7 +215,9 @@ def recurrent_plume_fields(model, sigma_src):
         warmup_dt_total = first_dt_total * warmup_fraction
         warmup_steps = max(1, int(round(substeps * warmup_fraction)))
         warmup_dt = warmup_dt_total / warmup_steps
-        warmup_source = _source_grid(model, t_values[0], x_grid, y_grid, sigma_src)
+        warmup_source = _source_grid(
+            model, t_values[0], x_grid, y_grid, x_mesh, y_mesh, sigma_src
+        )
         warmup_q = model.Q(t_values[0].view(1, 1)).view(())
         for _ in range(warmup_steps):
             field = _advance_recurrent_step(
@@ -196,6 +226,8 @@ def recurrent_plume_fields(model, sigma_src):
                 warmup_q,
                 x_grid,
                 y_grid,
+                x_mesh_flat,
+                y_mesh_flat,
                 u_values[0],
                 v_values[0],
                 diffusion,
@@ -209,7 +241,7 @@ def recurrent_plume_fields(model, sigma_src):
         t_i = t_values[i]
         dt_total = torch.clamp(t_values[i + 1] - t_i, min=1e-6)
         dt = dt_total / substeps
-        source = _source_grid(model, t_i, x_grid, y_grid, sigma_src)
+        source = _source_grid(model, t_i, x_grid, y_grid, x_mesh, y_mesh, sigma_src)
         q_i = model.Q(t_i.view(1, 1)).view(())
         for _ in range(substeps):
             field = _advance_recurrent_step(
@@ -218,6 +250,8 @@ def recurrent_plume_fields(model, sigma_src):
                 q_i,
                 x_grid,
                 y_grid,
+                x_mesh_flat,
+                y_mesh_flat,
                 u_values[i],
                 v_values[i],
                 diffusion,
@@ -241,6 +275,22 @@ def recurrent_plume_value(model, xyt, sigma_src):
 
     if t_grid.numel() == 1:
         return _sample_grid_bilinear(fields[0], x_query, y_query, x_grid, y_grid)
+
+    idx_exact = torch.bucketize(t_query.contiguous(), t_grid)
+    exact_valid = idx_exact < t_grid.numel()
+    exact_match = torch.zeros_like(exact_valid, dtype=torch.bool)
+    if torch.any(exact_valid):
+        exact_match[exact_valid] = (
+            torch.abs(t_query[exact_valid] - t_grid[idx_exact[exact_valid]]) < 1e-6
+        )
+    if bool(torch.all(exact_match).detach().cpu().item()):
+        val = torch.empty((t_query.numel(), 1), dtype=xyt.dtype, device=xyt.device)
+        for layer in torch.unique(idx_exact):
+            mask = idx_exact == layer
+            val[mask] = _sample_grid_bilinear(
+                fields[layer], x_query[mask], y_query[mask], x_grid, y_grid
+            )
+        return val
 
     idx_hi = torch.bucketize(t_query.contiguous(), t_grid)
     idx_hi = torch.clamp(idx_hi, min=1, max=t_grid.numel() - 1)

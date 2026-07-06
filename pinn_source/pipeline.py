@@ -42,6 +42,8 @@ from config import (
     DIFFUSION_NX,
     DIFFUSION_NY,
     SOURCE_POSITION_PAD_M,
+    SOURCE_INIT_MODE,
+    SOURCE_INIT_UPWIND_DISTANCE_M,
     DATA_NORMALIZE,
     TRAIN_ON_RESIDUAL,
     BASELINE_MODE,
@@ -60,6 +62,12 @@ from config import (
     EVENT_TIME_WEIGHT,
     EVENT_PEAK_WEIGHT,
     EVENT_PEAK_RATIO,
+    RESIDUAL_FOCAL_WEIGHT,
+    RESIDUAL_FOCAL_POWER,
+    RESIDUAL_FOCAL_SCALE,
+    RESIDUAL_FOCAL_MAX_WEIGHT,
+    RAW_RESIDUAL_BASE_WEIGHT,
+    RAW_RESIDUAL_WORST_WEIGHT,
     MAX_GRAD_NORM,
     EARLY_STOP_START,
     EARLY_STOP_PATIENCE,
@@ -67,6 +75,13 @@ from config import (
     DEBUG_EVERY,
     MULTI_HIGH_RATIO,
     MULTI_HIGH_MIN_RELIEF,
+    SINGLE_STATION_DOMINANCE_RATIO,
+    SINGLE_STATION_PEAK_MISS_RATIO,
+    SINGLE_STATION_PEAK_TIME_TOL_H,
+    ENABLE_STATION_ABLATION,
+    ABLATION_TARGET_STATION,
+    ABLATION_NEIGHBOR_RADIUS_M,
+    ABLATION_MAX_NEIGHBORS,
     RECURRENT_GRID_NX,
     RECURRENT_GRID_NY,
     RECURRENT_SUBSTEPS,
@@ -230,6 +245,171 @@ def _freeze_recurrent_unused_parameters(model):
     return frozen
 
 
+def _env_flag(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return bool(default)
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_float(name, default):
+    value = os.environ.get(name)
+    if value is None or not str(value).strip():
+        return float(default)
+    return float(value)
+
+
+def _env_int(name, default):
+    value = os.environ.get(name)
+    if value is None or not str(value).strip():
+        return int(default)
+    return int(value)
+
+
+def _select_ablation_stations(sites, station_cols):
+    enable_ablation = _env_flag(
+        "PINN_ENABLE_STATION_ABLATION", ENABLE_STATION_ABLATION
+    )
+    if not enable_ablation:
+        return list(station_cols), None
+
+    target = str(
+        os.environ.get("PINN_ABLATION_TARGET_STATION", ABLATION_TARGET_STATION) or ""
+    ).strip()
+    if not target:
+        raise ValueError("ENABLE_STATION_ABLATION=True requires ABLATION_TARGET_STATION.")
+    if target not in station_cols:
+        raise ValueError(
+            f"Ablation target station is not present in concentration data: {target}"
+        )
+
+    sites_indexed = sites.set_index("station")
+    if target not in sites_indexed.index:
+        raise ValueError(f"Ablation target station is not present in sites data: {target}")
+
+    target_row = sites_indexed.loc[target]
+    radius_m = max(
+        _env_float("PINN_ABLATION_NEIGHBOR_RADIUS_M", ABLATION_NEIGHBOR_RADIUS_M),
+        0.0,
+    )
+    max_neighbors = max(
+        _env_int("PINN_ABLATION_MAX_NEIGHBORS", ABLATION_MAX_NEIGHBORS),
+        0,
+    )
+    candidates = []
+    for station in station_cols:
+        if station not in sites_indexed.index:
+            continue
+        row = sites_indexed.loc[station]
+        distance_m = float(
+            np.hypot(float(row["x"]) - float(target_row["x"]), float(row["y"]) - float(target_row["y"]))
+        )
+        if station == target or distance_m <= radius_m:
+            candidates.append((station, distance_m))
+
+    candidates = sorted(candidates, key=lambda item: (item[1], item[0]))
+    selected = [target]
+    for station, _distance_m in candidates:
+        if station == target:
+            continue
+        selected.append(station)
+        if max_neighbors > 0 and len(selected) >= max_neighbors + 1:
+            break
+
+    if len(selected) < 2:
+        raise ValueError(
+            "Station ablation selected fewer than two stations; increase "
+            "ABLATION_NEIGHBOR_RADIUS_M or ABLATION_MAX_NEIGHBORS."
+        )
+
+    selected_set = set(selected)
+    selected = [station for station in station_cols if station in selected_set]
+    distances = {
+        station: float(
+            np.hypot(
+                float(sites_indexed.loc[station, "x"]) - float(target_row["x"]),
+                float(sites_indexed.loc[station, "y"]) - float(target_row["y"]),
+            )
+        )
+        for station in selected
+    }
+    metadata = {
+        "enabled": True,
+        "target_station": target,
+        "neighbor_radius_m": radius_m,
+        "max_neighbors": max_neighbors,
+        "selected_stations": selected,
+        "selected_station_distances_m": distances,
+    }
+    return selected, metadata
+
+
+def _compute_source_initial_position(
+    x_obs_p,
+    y_obs_p,
+    u_obs_mps,
+    v_obs_mps,
+    c_obs,
+    x0,
+    y0,
+    L,
+    source_x_min_p,
+    source_x_max_p,
+    source_y_min_p,
+    source_y_max_p,
+):
+    mode = str(SOURCE_INIT_MODE or "center").strip().lower()
+    if mode in {"", "center"}:
+        return 0.0, 0.0, {
+            "mode": "center",
+            "x_m": float(x0),
+            "y_m": float(y0),
+        }
+    if mode != "max_station_upwind":
+        raise ValueError(
+            "SOURCE_INIT_MODE must be 'center' or 'max_station_upwind'."
+        )
+
+    max_idx = int(np.nanargmax(c_obs))
+    station_x = float(x_obs_p[max_idx])
+    station_y = float(y_obs_p[max_idx])
+    wind_u = float(u_obs_mps[max_idx])
+    wind_v = float(v_obs_mps[max_idx])
+    wind_norm = float(np.hypot(wind_u, wind_v))
+    distance_m = max(float(SOURCE_INIT_UPWIND_DISTANCE_M), 0.0)
+
+    if wind_norm > 1e-6 and distance_m > 0.0:
+        source_x_p = station_x - wind_u / wind_norm * distance_m
+        source_y_p = station_y - wind_v / wind_norm * distance_m
+        reason = "max anomaly station shifted upwind"
+    else:
+        source_x_p = station_x
+        source_y_p = station_y
+        reason = "max anomaly station wind too weak; using station location"
+
+    source_x_p = float(np.clip(source_x_p, source_x_min_p, source_x_max_p))
+    source_y_p = float(np.clip(source_y_p, source_y_min_p, source_y_max_p))
+    source_x_norm = float((source_x_p - x0) / L)
+    source_y_norm = float((source_y_p - y0) / L)
+    metadata = {
+        "mode": mode,
+        "reason": reason,
+        "max_observation_index": max_idx,
+        "max_observation_fit": float(c_obs[max_idx]),
+        "station_x_m": station_x,
+        "station_y_m": station_y,
+        "wind_u_mps": wind_u,
+        "wind_v_mps": wind_v,
+        "wind_speed_mps": wind_norm,
+        "upwind_distance_m": distance_m,
+        "x_m": source_x_p,
+        "y_m": source_y_p,
+        "x_norm": source_x_norm,
+        "y_norm": source_y_norm,
+    }
+    return source_x_norm, source_y_norm, metadata
+
+
 def run(
     site_path,
     conc_path,
@@ -282,6 +462,15 @@ def run(
     valid_station_cols = [c for c in station_cols if not data[c].isna().all()]
     if not valid_station_cols:
         raise ValueError("All station columns are empty in the training data.")
+    valid_station_cols, ablation_metadata = _select_ablation_stations(
+        sites, valid_station_cols
+    )
+    if ablation_metadata is not None:
+        print(
+            "Station ablation enabled: "
+            f"target={ablation_metadata['target_station']}, "
+            f"selected={', '.join(ablation_metadata['selected_stations'])}"
+        )
 
     # Keep only needed columns
     data = data[["time", "dir", "sp"] + valid_station_cols]
@@ -390,6 +579,10 @@ def run(
     v_obs = obs[:, 7]
     sp_obs_raw = obs[:, 8]
     t_obs_group = obs[:, 2].copy()
+    x_obs_p = x_obs.copy()
+    y_obs_p = y_obs.copy()
+    u_obs_mps = u_obs.copy()
+    v_obs_mps = v_obs.copy()
 
     # Normalize time to start at 0 and in hours
     t0 = np.min(t_obs)
@@ -439,6 +632,20 @@ def run(
     source_x_max = (source_x_max_p - x0) / L
     source_y_min = (source_y_min_p - y0) / L
     source_y_max = (source_y_max_p - y0) / L
+    source_init_x, source_init_y, source_init_metadata = _compute_source_initial_position(
+        x_obs_p=x_obs_p,
+        y_obs_p=y_obs_p,
+        u_obs_mps=u_obs_mps,
+        v_obs_mps=v_obs_mps,
+        c_obs=c_obs,
+        x0=x0,
+        y0=y0,
+        L=L,
+        source_x_min_p=source_x_min_p,
+        source_x_max_p=source_x_max_p,
+        source_y_min_p=source_y_min_p,
+        source_y_max_p=source_y_max_p,
+    )
 
     # Scale wind to match normalized coordinates
     u_obs = u_obs * T / L * WIND_SCALE
@@ -603,6 +810,16 @@ def run(
 
     ModelCls = get_model(MODEL_NAME)
     model = ModelCls().to(device)
+    with torch.no_grad():
+        model.xs.fill_(float(source_init_x))
+        model.ys.fill_(float(source_init_y))
+    print(
+        "Source initial position: "
+        f"mode={source_init_metadata['mode']}, "
+        f"x={source_init_metadata['x_m']:.1f} m, "
+        f"y={source_init_metadata['y_m']:.1f} m, "
+        f"max_fit={source_init_metadata.get('max_observation_fit', 0.0):.3f}"
+    )
     if FIELD_MODE == "recurrent_pde":
         frozen_params = _freeze_recurrent_unused_parameters(model)
         if frozen_params:
@@ -732,7 +949,32 @@ def run(
         sync_device()
         t_section = time.perf_counter()
         data_residual = c_pred - c_obs_t
-        loss_data = torch.mean(data_weight_t * (data_residual**2))
+        raw_abs_residual = torch.abs(data_residual) * float(c_scale)
+        weighted_raw_abs_residual = torch.sqrt(data_weight_t) * raw_abs_residual
+        raw_residual_base_loss = torch.mean(weighted_raw_abs_residual)
+        raw_residual_worst_loss = torch.max(raw_abs_residual)
+        residual_focal_weight = torch.ones_like(data_residual)
+        if RESIDUAL_FOCAL_WEIGHT > 0:
+            residual_scale = max(float(RESIDUAL_FOCAL_SCALE), 1e-6)
+            residual_ratio = torch.abs(data_residual) / residual_scale
+            residual_focal_weight = (
+                1.0
+                + float(RESIDUAL_FOCAL_WEIGHT)
+                * torch.pow(residual_ratio, float(RESIDUAL_FOCAL_POWER))
+            )
+            if RESIDUAL_FOCAL_MAX_WEIGHT is not None and RESIDUAL_FOCAL_MAX_WEIGHT > 0:
+                residual_focal_weight = torch.clamp(
+                    residual_focal_weight,
+                    max=float(RESIDUAL_FOCAL_MAX_WEIGHT),
+                )
+            raw_residual_base_loss = torch.mean(
+                torch.sqrt(data_weight_t * residual_focal_weight)
+                * raw_abs_residual
+            )
+        loss_data = (
+            float(RAW_RESIDUAL_BASE_WEIGHT) * raw_residual_base_loss
+            + float(RAW_RESIDUAL_WORST_WEIGHT) * raw_residual_worst_loss
+        )
         D = (
             torch.tensor(
                 float(getattr(model, "recurrent_d_min_norm", 0.0)),
@@ -805,7 +1047,16 @@ def run(
         if epoch % 500 == 0:
             loss_parts = [
                 f"data={loss_data.item():.4f}",
+                f"raw_base={raw_residual_base_loss.item():.2f}",
+                f"raw_worst={raw_residual_worst_loss.item():.2f}",
             ]
+            if RESIDUAL_FOCAL_WEIGHT > 0:
+                loss_parts.append(
+                    f"focal_w_mean={residual_focal_weight.detach().mean().item():.3f}"
+                )
+                loss_parts.append(
+                    f"focal_w_max={residual_focal_weight.detach().max().item():.3f}"
+                )
             if Q_SMOOTH_WEIGHT > 0 or Q_L2_WEIGHT > 0:
                 loss_parts.append(f"q_smooth={q_smooth_loss.item():.4f}")
                 loss_parts.append(f"q_l2={q_l2_loss.item():.4f}")
@@ -948,6 +1199,26 @@ def run(
                     "source_lat": float(source_lat_dbg),
                     "raw_loss": float(raw_loss.detach().item()),
                     "data_loss": float(loss_data.detach().item()),
+                    "raw_residual_base_loss": float(
+                        raw_residual_base_loss.detach().item()
+                    ),
+                    "raw_residual_worst_loss": float(
+                        raw_residual_worst_loss.detach().item()
+                    ),
+                    "raw_residual_worst_term": float(
+                        (
+                            float(RAW_RESIDUAL_WORST_WEIGHT)
+                            * raw_residual_worst_loss
+                        )
+                        .detach()
+                        .item()
+                    ),
+                    "residual_focal_weight_mean": float(
+                        residual_focal_weight.detach().mean().item()
+                    ),
+                    "residual_focal_weight_max": float(
+                        residual_focal_weight.detach().max().item()
+                    ),
                     "q_smooth_loss": float(q_smooth_loss.detach().item()),
                     "q_l2_loss": float(q_l2_loss.detach().item()),
                     "D_norm": float(D.detach().item()),
@@ -957,9 +1228,7 @@ def run(
                         torch.sqrt(torch.mean((pred_raw - c_obs_raw_t) ** 2)).detach().item()
                     ),
                     "weighted_data_residual": float(
-                        torch.mean(
-                            torch.sqrt(data_weight_t) * torch.abs(data_residual)
-                        ).detach().item()
+                        torch.mean(weighted_raw_abs_residual).detach().item()
                     ),
                     "pred_raw_mean": float(pred_raw_flat.mean().item()),
                     "pred_raw_max": float(pred_raw_flat.max().item()),
@@ -1140,6 +1409,29 @@ def run(
         print(f"Saved station peak diagnostics: {peak_path}")
 
     quality_warnings = []
+    quality_diagnostics = {}
+    station_residual_energy = {}
+    total_residual_energy = 0.0
+    for station in valid_stations:
+        mask = obs_station_labels_np == station
+        if not np.any(mask):
+            continue
+        station_obs_fit = c_obs[np.flatnonzero(mask)]
+        energy = float(np.sum(np.square(station_obs_fit)))
+        station_residual_energy[station] = energy
+        total_residual_energy += energy
+    dominant_station = None
+    dominant_station_ratio = 0.0
+    if total_residual_energy > 1e-12 and station_residual_energy:
+        dominant_station = max(station_residual_energy, key=station_residual_energy.get)
+        dominant_station_ratio = station_residual_energy[dominant_station] / total_residual_energy
+        quality_diagnostics["dominant_station"] = {
+            "station": dominant_station,
+            "residual_energy_ratio": float(dominant_station_ratio),
+            "residual_energy": float(station_residual_energy[dominant_station]),
+            "total_residual_energy": float(total_residual_energy),
+        }
+
     source_margin_x = min(xs_p - source_x_min_p, source_x_max_p - xs_p)
     source_margin_y = min(ys_p - source_y_min_p, source_y_max_p - ys_p)
     source_margin_m = min(source_margin_x, source_margin_y)
@@ -1175,16 +1467,78 @@ def run(
             quality_warnings.append(
                 "one or more high-value station peaks are badly missed"
             )
+        if (
+            dominant_station is not None
+            and dominant_station_ratio >= float(SINGLE_STATION_DOMINANCE_RATIO)
+        ):
+            dominant_peak = peak_df_quality[
+                peak_df_quality["station"] == dominant_station
+            ]
+            if not dominant_peak.empty:
+                dominant_peak_row = dominant_peak.iloc[0]
+                dominant_peak_missed = (
+                    float(dominant_peak_row["obs_peak_fit"]) >= EVENT_WINDOW_MIN_MAX
+                    and (
+                        float(
+                            pd.Series(
+                                [dominant_peak_row["pred_at_obs_peak_fit_ratio"]]
+                            ).fillna(0.0).iloc[0]
+                        )
+                        < float(SINGLE_STATION_PEAK_MISS_RATIO)
+                        or abs(float(dominant_peak_row["peak_time_error_h"]))
+                        > float(SINGLE_STATION_PEAK_TIME_TOL_H)
+                    )
+                )
+                quality_diagnostics["dominant_station"].update(
+                    {
+                        "obs_peak_fit": float(dominant_peak_row["obs_peak_fit"]),
+                        "pred_at_obs_peak_fit": float(
+                            dominant_peak_row["pred_at_obs_peak_fit"]
+                        ),
+                        "pred_at_obs_peak_fit_ratio": float(
+                            pd.Series(
+                                [dominant_peak_row["pred_at_obs_peak_fit_ratio"]]
+                            ).fillna(0.0).iloc[0]
+                        ),
+                        "peak_time_error_h": float(
+                            dominant_peak_row["peak_time_error_h"]
+                        ),
+                        "peak_missed": bool(dominant_peak_missed),
+                    }
+                )
+                if dominant_peak_missed:
+                    quality_warnings.append(
+                        "single-station dominant event peak is badly missed; "
+                        "source result is low confidence"
+                    )
 
     quality_payload = {
         "target_pollutant": result_target_pollutant,
         "training_inputs": copied_input_paths,
+        "station_ablation": ablation_metadata
+        or {
+            "enabled": False,
+            "selected_stations": list(valid_stations),
+        },
+        "quality_diagnostics": quality_diagnostics,
         "model": {
             "field_mode": FIELD_MODE,
             "q_mode": getattr(model, "q_mode", Q_MODE),
             "train_on_residual": bool(TRAIN_ON_RESIDUAL),
             "data_normalize": bool(DATA_NORMALIZE),
             "c_scale": float(c_scale),
+            "data_loss": {
+                "mode": "raw_weighted_mae_plus_worst_residual",
+                "raw_residual_base_weight": float(RAW_RESIDUAL_BASE_WEIGHT),
+                "raw_residual_worst_weight": float(RAW_RESIDUAL_WORST_WEIGHT),
+                "weighted_base_uses_sqrt_data_weight": True,
+            },
+            "residual_focal_loss": {
+                "weight": float(RESIDUAL_FOCAL_WEIGHT),
+                "power": float(RESIDUAL_FOCAL_POWER),
+                "scale": float(RESIDUAL_FOCAL_SCALE),
+                "max_weight": float(RESIDUAL_FOCAL_MAX_WEIGHT),
+            },
         },
         "recurrent_pde": (
             {
@@ -1202,6 +1556,7 @@ def run(
         ),
         "source": {
             "mode": "single",
+            "initialization": source_init_metadata,
             "x_m": float(xs_p),
             "y_m": float(ys_p),
             "lat": float(pred_lat),

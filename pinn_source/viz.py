@@ -302,7 +302,7 @@ def plot_sites_and_source(
     if save_path is not None:
         fig.savefig(save_path, dpi=220)
     if show:
-        plt.show()
+        plt.show(block=True)
     else:
         plt.close(fig)
 
@@ -339,9 +339,43 @@ def diffusion_animation(
     show=True,
 ):
     model.eval()
-    xs_lin = np.linspace(x_min, x_max, nx)
-    ys_lin = np.linspace(y_min, y_max, ny)
+    source_x_m, source_y_m = latlon_to_xy(pred_lon, pred_lat, lon0, lat0)
+    sites_xy = sites_plot.copy()
+    sites_xy[["x_plot", "y_plot"]] = sites_xy.apply(
+        lambda row: pd.Series(latlon_to_xy(row["lon"], row["lat"], lon0, lat0)),
+        axis=1,
+    )
+
+    data_x_min = min(float(x_min), float(source_x_m), float(sites_xy["x_plot"].min()))
+    data_x_max = max(float(x_max), float(source_x_m), float(sites_xy["x_plot"].max()))
+    data_y_min = min(float(y_min), float(source_y_m), float(sites_xy["y_plot"].min()))
+    data_y_max = max(float(y_max), float(source_y_m), float(sites_xy["y_plot"].max()))
+    data_width = max(data_x_max - data_x_min, 1.0)
+    data_height = max(data_y_max - data_y_min, 1.0)
+    data_x_pad = max(data_width * 0.22, 600.0)
+    data_y_pad = max(data_height * 0.22, 600.0)
+    data_x_min -= data_x_pad
+    data_x_max += data_x_pad
+    data_y_min -= data_y_pad
+    data_y_max += data_y_pad
+
+    data_center_x = 0.5 * (data_x_min + data_x_max)
+    data_center_y = 0.5 * (data_y_min + data_y_max)
+    data_span = max(data_x_max - data_x_min, data_y_max - data_y_min)
+    data_x_min = data_center_x - 0.5 * data_span
+    data_x_max = data_center_x + 0.5 * data_span
+    data_y_min = data_center_y - 0.5 * data_span
+    data_y_max = data_center_y + 0.5 * data_span
+
+    xs_lin = np.linspace(data_x_min, data_x_max, nx)
+    ys_lin = np.linspace(data_y_min, data_y_max, ny)
     XX, YY = np.meshgrid(xs_lin, ys_lin)
+    valid_domain_mask = (
+        (XX >= float(x_min))
+        & (XX <= float(x_max))
+        & (YY >= float(y_min))
+        & (YY <= float(y_max))
+    )
 
     # Use time range in hours
     t_frames = np.linspace(t_min, t_max, n_frames)
@@ -367,40 +401,47 @@ def diffusion_animation(
         if ADD_BASELINE_TO_VIZ and baseline_w is not None:
             cc = cc + float(np.interp(tf, t_w, baseline_w))
         cc = np.clip(cc, 0, None)  # for visualization
+        cc = np.where(valid_domain_mask, cc, np.nan)
         frames.append(cc)
 
     norm = _diffusion_color_norm(frames)
 
-    source_x_m, source_y_m = latlon_to_xy(pred_lon, pred_lat, lon0, lat0)
-    sites_xy = sites_plot.copy()
-    sites_xy[["x_plot", "y_plot"]] = sites_xy.apply(
-        lambda row: pd.Series(latlon_to_xy(row["lon"], row["lat"], lon0, lat0)),
-        axis=1,
-    )
+    plume_thresholds = []
+    for frame in frames:
+        finite_frame = frame[np.isfinite(frame)]
+        frame_max = float(np.max(finite_frame)) if finite_frame.size else 0.0
+        if frame_max <= 0.0:
+            continue
+        plume_thresholds.append(frame >= max(frame_max * 0.03, frame_max * 1e-4))
 
-    # Ensure source is inside the view with a small padding, in projected meters.
-    plot_x_min = min(float(x_min), float(source_x_m))
-    plot_x_max = max(float(x_max), float(source_x_m))
-    plot_y_min = min(float(y_min), float(source_y_m))
-    plot_y_max = max(float(y_max), float(source_y_m))
-    pad_x = max((plot_x_max - plot_x_min) * 0.05, 1.0)
-    pad_y = max((plot_y_max - plot_y_min) * 0.05, 1.0)
-    plot_x_min -= pad_x
-    plot_x_max += pad_x
-    plot_y_min -= pad_y
-    plot_y_max += pad_y
+    if plume_thresholds and np.any(np.logical_or.reduce(plume_thresholds)):
+        plume_mask = np.logical_or.reduce(plume_thresholds)
+        plume_y_idx, plume_x_idx = np.where(plume_mask)
+        plume_x_min = float(xs_lin[int(plume_x_idx.min())])
+        plume_x_max = float(xs_lin[int(plume_x_idx.max())])
+        plume_y_min = float(ys_lin[int(plume_y_idx.min())])
+        plume_y_max = float(ys_lin[int(plume_y_idx.max())])
+    else:
+        plume_x_min = plume_x_max = float(source_x_m)
+        plume_y_min = plume_y_max = float(source_y_m)
+
+    plot_x_min = min(data_x_min, plume_x_min)
+    plot_x_max = max(data_x_max, plume_x_max)
+    plot_y_min = min(data_y_min, plume_y_min)
+    plot_y_max = max(data_y_max, plume_y_max)
 
     width_m = max(plot_x_max - plot_x_min, 1.0)
     height_m = max(plot_y_max - plot_y_min, 1.0)
-    fig_width = 7.0
-    fig_height = min(max(fig_width * height_m / width_m, 4.2), 8.0)
+    fig_width = 8.2
+    fig_height = min(max(fig_width * height_m / width_m, 5.2), 8.8)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     cmap = plt.get_cmap("turbo").copy()
     cmap.set_under("#f3f3f3")
+    cmap.set_bad("#f3f3f3")
     im = ax.imshow(
         frames[0],
         origin="lower",
-        extent=[x_min, x_max, y_min, y_max],
+        extent=[data_x_min, data_x_max, data_y_min, data_y_max],
         cmap=cmap,
         aspect="equal",
         norm=norm,
@@ -428,7 +469,7 @@ def diffusion_animation(
     ax.set_ylim(plot_y_min, plot_y_max)
     ax.set_xlabel("X distance (m)")
     ax.set_ylabel("Y distance (m)")
-    ax.legend(loc="upper right")
+    ax.legend(loc="upper right", frameon=True)
     cbar = fig.colorbar(im, ax=ax, extend="max")
     cbar.set_label("Concentration")
     if hasattr(norm, "vmax"):
@@ -452,7 +493,7 @@ def diffusion_animation(
     )
     ani.save(out_gif, writer="pillow", fps=5)
     if show:
-        plt.show()
+        plt.show(block=True)
     else:
         plt.close(fig)
 
@@ -512,6 +553,6 @@ def plot_station_timeseries(
     if save_path is not None:
         fig.savefig(save_path, dpi=220)
     if show:
-        plt.show()
+        plt.show(block=True)
     else:
         plt.close(fig)
