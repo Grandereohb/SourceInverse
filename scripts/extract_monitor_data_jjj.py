@@ -25,15 +25,15 @@ DEFAULT_SITES_NAME = "sites.xlsx"
 # .xls/.xlsx station workbook.
 MONITOR_DATA_DIR = 'data/jjj/2026年03-04-05月小时数据/5月小时数据'
 # START_TIME / END_TIME: inclusive extraction time range.
-START_TIME = '2026-05-24 01:00:00'
-END_TIME = '2026-05-24 13:00:00'
+START_TIME = '2026-05-15 01:00:00'
+END_TIME = '2026-05-15 13:00:00'
 # TARGET_POLLUTANT: pollutant to extract. It may be either the bare pollutant
 # name, such as "非甲烷总烃", or the full Excel column name, such as
 # "非甲烷总烃(μg/m³)".
-TARGET_POLLUTANT = '1-戊烯'
+TARGET_POLLUTANT = '乙苯'
 # WIND_STATION_NAME: use this station's wind direction/speed to build wind.xlsx.
 # Leave empty to keep the old behavior: average wind from all station files.
-WIND_STATION_NAME = 'M1站点（临港西部控制点位）'
+WIND_STATION_NAME = 'H2站点（罐区区域点位）'
 # SITES_FILE_PATH: workbook containing current station location information.
 SITES_FILE_PATH = r"data\jjj\2026年03-04-05月小时数据\当前数据点位信息.xlsx"
 

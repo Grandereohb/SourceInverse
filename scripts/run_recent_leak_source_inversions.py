@@ -20,23 +20,30 @@ ABNORMAL_DIR = DATA_DIR / "abnormal_high_monitor_data"
 PINN_SCRIPT = REPO_ROOT / "pinn_source" / "pinn_source_pinn.py"
 PINN_CONFIG = REPO_ROOT / "pinn_source" / "config.py"
 
-# INPUT_FILE_PATH = (
-#     DATA_DIR
-#     / "shsh_js"
-#     / "自动审核小时数据_标准单位_2025-10-16 00_00_00_2026-04-16 12_00_00.xlsx"
-# )
+INPUT_FILE_PATH = ABNORMAL_DIR / "abnormal_high_monitoar_data.xlsx"
+
+MONITOR_INPUT_PATH = (
+    DATA_DIR
+    / "shsh_js"
+    / "自动审核小时数据_标准单位_2025-10-16 00_00_00_2026-04-16 12_00_00.xlsx"
+)
+
+EXTRACT_SCRIPT_KEY = "shsh_js"
+EXTRACT_OUTPUT_FOLDER = "shsh_js"
+
 # Abnormal-high event workbook to traverse. This must point to a concrete Excel
 # file with an `abnormal_high_records` sheet, not just a directory.
-INPUT_FILE_PATH = ABNORMAL_DIR / "abnormal_high_monitor_data_jjj_may.xlsx"
-MONITOR_INPUT_PATH = DATA_DIR / "jjj" / "2026年03-04-05月小时数据" / "5月小时数据"
-EXTRACT_SCRIPT_KEY = "jjj"
-EXTRACT_OUTPUT_FOLDER = ""
+# INPUT_FILE_PATH = ABNORMAL_DIR / "abnormal_high_monitor_data_jjj_may.xlsx"
+# MONITOR_INPUT_PATH = DATA_DIR / "jjj" / "2026年03-04-05月小时数据" / "5月小时数据"
+# EXTRACT_SCRIPT_KEY = "jjj"
+# EXTRACT_OUTPUT_FOLDER = ""
+
 
 # =========================
 # Manual Inputs
 # =========================
 # SOURCE_INVERSION_COUNT: number of leak events to run in sequence.
-SOURCE_INVERSION_COUNT = 5
+SOURCE_INVERSION_COUNT = 15
 
 # TRAVERSE_DIRECTION:
 # - "backward": traverse leak events from later time to earlier time.
@@ -199,9 +206,9 @@ def python_config_value(value: str | Path) -> str:
 
 def replace_python_string_assignment(text: str, name: str, value: str | Path) -> str:
     pattern = (
-        rf'^{name}\s*=\s*'
+        rf"^{name}\s*=\s*"
         rf'(?:\(\s*(?:r)?["\'][\s\S]*?["\']\s*\)|(?:r)?["\'].*?["\'])'
-        rf'\s*$'
+        rf"\s*$"
     )
     replacement = f"{name} = {python_literal(python_config_value(value))}"
     text, count = re.subn(pattern, replacement, text, count=1, flags=re.M)
@@ -230,7 +237,6 @@ def parse_extracted_input_paths(log_path: Path) -> dict[str, Path]:
     patterns = {
         "CONC_PATH": r"^Saved concentration file:\s*(.+?)\s*$",
         "WIND_PATH": r"^Saved wind file:\s*(.+?)\s*$",
-        "SITE_PATH": r"^Saved sites file:\s*(.+?)\s*$",
     }
     parsed: dict[str, Path] = {}
     for key, pattern in patterns.items():
@@ -243,10 +249,25 @@ def parse_extracted_input_paths(log_path: Path) -> dict[str, Path]:
         if not path.exists():
             raise FileNotFoundError(f"Parsed extracted input does not exist: {path}")
         parsed[key] = path
+
+    site_match = re.search(r"^Saved sites file:\s*(.+?)\s*$", text, flags=re.M)
+    if site_match is not None:
+        site_path = Path(site_match.group(1).strip())
+        if not site_path.is_absolute():
+            site_path = (REPO_ROOT / site_path).resolve()
+    else:
+        site_path = parsed["CONC_PATH"].parent / "sites.xlsx"
+    if not site_path.exists():
+        raise FileNotFoundError(
+            f"Could not find sites.xlsx for extracted inputs. Expected: {site_path}"
+        )
+    parsed["SITE_PATH"] = site_path
     return parsed
 
 
-def update_pinn_config_inputs(leak: dict, extracted_paths: dict[str, Path] | None = None) -> None:
+def update_pinn_config_inputs(
+    leak: dict, extracted_paths: dict[str, Path] | None = None
+) -> None:
     data_dir = resolved_extract_output_dir()
     replacements = {
         "SITE_PATH": data_dir / "sites.xlsx",

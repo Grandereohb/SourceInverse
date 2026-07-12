@@ -346,36 +346,17 @@ def diffusion_animation(
         axis=1,
     )
 
-    data_x_min = min(float(x_min), float(source_x_m), float(sites_xy["x_plot"].min()))
-    data_x_max = max(float(x_max), float(source_x_m), float(sites_xy["x_plot"].max()))
-    data_y_min = min(float(y_min), float(source_y_m), float(sites_xy["y_plot"].min()))
-    data_y_max = max(float(y_max), float(source_y_m), float(sites_xy["y_plot"].max()))
-    data_width = max(data_x_max - data_x_min, 1.0)
-    data_height = max(data_y_max - data_y_min, 1.0)
-    data_x_pad = max(data_width * 0.22, 600.0)
-    data_y_pad = max(data_height * 0.22, 600.0)
-    data_x_min -= data_x_pad
-    data_x_max += data_x_pad
-    data_y_min -= data_y_pad
-    data_y_max += data_y_pad
-
-    data_center_x = 0.5 * (data_x_min + data_x_max)
-    data_center_y = 0.5 * (data_y_min + data_y_max)
-    data_span = max(data_x_max - data_x_min, data_y_max - data_y_min)
-    data_x_min = data_center_x - 0.5 * data_span
-    data_x_max = data_center_x + 0.5 * data_span
-    data_y_min = data_center_y - 0.5 * data_span
-    data_y_max = data_center_y + 0.5 * data_span
+    # Only evaluate and display the PDE-valid concentration field. Earlier
+    # versions expanded this raster beyond the PDE grid, which required masking
+    # and left large blank margins around the valid data region.
+    data_x_min = float(x_min)
+    data_x_max = float(x_max)
+    data_y_min = float(y_min)
+    data_y_max = float(y_max)
 
     xs_lin = np.linspace(data_x_min, data_x_max, nx)
     ys_lin = np.linspace(data_y_min, data_y_max, ny)
     XX, YY = np.meshgrid(xs_lin, ys_lin)
-    valid_domain_mask = (
-        (XX >= float(x_min))
-        & (XX <= float(x_max))
-        & (YY >= float(y_min))
-        & (YY <= float(y_max))
-    )
 
     # Use time range in hours
     t_frames = np.linspace(t_min, t_max, n_frames)
@@ -401,7 +382,6 @@ def diffusion_animation(
         if ADD_BASELINE_TO_VIZ and baseline_w is not None:
             cc = cc + float(np.interp(tf, t_w, baseline_w))
         cc = np.clip(cc, 0, None)  # for visualization
-        cc = np.where(valid_domain_mask, cc, np.nan)
         frames.append(cc)
 
     norm = _diffusion_color_norm(frames)
@@ -425,15 +405,15 @@ def diffusion_animation(
         plume_x_min = plume_x_max = float(source_x_m)
         plume_y_min = plume_y_max = float(source_y_m)
 
-    plot_x_min = min(data_x_min, plume_x_min)
-    plot_x_max = max(data_x_max, plume_x_max)
-    plot_y_min = min(data_y_min, plume_y_min)
-    plot_y_max = max(data_y_max, plume_y_max)
+    plot_x_min = data_x_min
+    plot_x_max = data_x_max
+    plot_y_min = data_y_min
+    plot_y_max = data_y_max
 
     width_m = max(plot_x_max - plot_x_min, 1.0)
     height_m = max(plot_y_max - plot_y_min, 1.0)
-    fig_width = 8.2
-    fig_height = min(max(fig_width * height_m / width_m, 5.2), 8.8)
+    fig_width = 8.8
+    fig_height = min(max(fig_width * height_m / width_m, 3.8), 8.8)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     cmap = plt.get_cmap("turbo").copy()
     cmap.set_under("#f3f3f3")

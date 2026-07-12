@@ -2046,6 +2046,38 @@ Validation:
 
 - `.venv_clean\Scripts\python.exe -m py_compile pinn_source\viz.py` passed.
 
+### 2026-07-12 Recent Leak Batch SHSH-JS Sites Path Parsing Fix
+
+User switched `scripts/run_recent_leak_source_inversions.py` back to SHSH-JS and hit:
+
+- `ValueError: Could not parse SITE_PATH from extraction log`
+
+Cause:
+
+- `extract_monitor_data_jjj.py` prints all three paths:
+  - `Saved concentration file: ...`
+  - `Saved wind file: ...`
+  - `Saved sites file: ...`
+- `extract_monitor_data_shsh_js.py` only generates/prints:
+  - `Saved concentration file: ...`
+  - `Saved wind file: ...`
+- SHSH-JS uses the existing `data/shsh_js/sites.xlsx`, so there is no `Saved sites file:` log line.
+
+Changed in `scripts/run_recent_leak_source_inversions.py`:
+
+- `parse_extracted_input_paths(...)` now requires concentration and wind paths from the log.
+- If `Saved sites file:` exists, it uses that parsed site path.
+- If not, it falls back to `sites.xlsx` in the same directory as the parsed concentration file.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile scripts\run_recent_leak_source_inversions.py` passed.
+- Confirmed `data/shsh_js/sites.xlsx` exists.
+- A smoke test with SHSH-JS style extraction log resolved:
+  - `CONC_PATH = data/shsh_js/concentration.xlsx`
+  - `WIND_PATH = data/shsh_js/wind.xlsx`
+  - `SITE_PATH = data/shsh_js/sites.xlsx`
+
 ### 2026-07-05 Plot Display Issue Check and Show Blocking Fix
 
 User reported that after the diffusion GIF visualization change, no images were displaying and asked whether the change was wrong.
@@ -2332,3 +2364,31 @@ Validation:
 - Parsed-path smoke test confirmed all three extracted paths exist.
 - A single extraction-only test for the first event updated `data/jjj/concentration.xlsx` to `正丁烷`.
 - Updating `pinn_source/config.py` from the real selected leak preserved `TARGET_POLLUTANT = '正丁烷'`.
+
+### 2026-07-06 Diffusion GIF Valid-Domain Crop
+
+User reported that the diffusion GIF looked squeezed into the center with large blank side margins.
+
+Cause:
+
+- The previous visualization generated a larger square raster extent to include source/station context.
+- After masking values outside the PDE-valid domain, those expanded outside-domain areas appeared as blank gray margins.
+- The actual concentration field occupied only the center of the larger plotting extent.
+
+Changed in `pinn_source/viz.py`:
+
+- `diffusion_animation(...)` now evaluates and displays only the PDE-valid concentration domain:
+  - `[x_min, x_max] x [y_min, y_max]`
+- Removed the expanded square raster extent for GIF frames.
+- Removed the outside-domain mask because the sampled raster is already restricted to the valid domain.
+- Kept `aspect="equal"` and adjusted figure height from the real domain aspect ratio.
+
+Expected effect:
+
+- The valid concentration field fills the GIF frame much better.
+- X/Y physical scale remains equal, so the plume is not visually stretched or distorted.
+- Areas with no valid concentration-field data are clipped rather than shown as blank margins.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile pinn_source\viz.py` passed.

@@ -1,9 +1,9 @@
 # =========================
 # Data Paths
 # =========================
-SITE_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/sites.xlsx'
-CONC_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/concentration.xlsx'
-WIND_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/wind.xlsx'
+SITE_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/shsh_js/sites.xlsx'
+CONC_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/shsh_js/concentration.xlsx'
+WIND_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/shsh_js/wind.xlsx'
 # =========================
 # Model / Device
 # =========================
@@ -15,7 +15,7 @@ FIELD_MODE = "recurrent_pde"
 # Output
 # =========================
 OUTPUT_DIR = r"C:\Document\phd\SourceInverse\SourceInverse\result"
-TARGET_POLLUTANT = '1-戊烯'
+TARGET_POLLUTANT = '硫化氢(H₂S)'
 MAKE_PLOTS = True
 
 # =========================

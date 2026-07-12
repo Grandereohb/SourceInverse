@@ -27,7 +27,7 @@ DEFAULT_OUTPUT_NAME = "abnormal_high_monitor_data_jjj_may.xlsx"
 
 # Only output abnormal records whose concentration is at least this value.
 # Overall pollutant means are still calculated from all data.
-MIN_CONCENTRATION_THRESHOLD = 500.0
+MIN_CONCENTRATION_THRESHOLD = 800.0
 TIME_COLUMN = "时间"
 SHEET_INDEX = 1
 NON_POLLUTANT_COLUMNS = {
