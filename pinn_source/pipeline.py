@@ -44,6 +44,7 @@ from config import (
     SOURCE_POSITION_PAD_M,
     SOURCE_INIT_MODE,
     SOURCE_INIT_UPWIND_DISTANCE_M,
+    SOURCE_INIT_PEAK_VALUE,
     DATA_NORMALIZE,
     TRAIN_ON_RESIDUAL,
     BASELINE_MODE,
@@ -357,6 +358,9 @@ def _compute_source_initial_position(
     source_x_max_p,
     source_y_min_p,
     source_y_max_p,
+    c_obs_raw=None,
+    station_labels=None,
+    time_labels=None,
 ):
     mode = str(SOURCE_INIT_MODE or "center").strip().lower()
     if mode in {"", "center"}:
@@ -370,7 +374,15 @@ def _compute_source_initial_position(
             "SOURCE_INIT_MODE must be 'center' or 'max_station_upwind'."
         )
 
-    max_idx = int(np.nanargmax(c_obs))
+    peak_value_mode = str(SOURCE_INIT_PEAK_VALUE or "raw").strip().lower()
+    if peak_value_mode not in {"raw", "fit"}:
+        raise ValueError("SOURCE_INIT_PEAK_VALUE must be 'raw' or 'fit'.")
+
+    peak_values = c_obs
+    if peak_value_mode == "raw" and c_obs_raw is not None:
+        peak_values = c_obs_raw
+
+    max_idx = int(np.nanargmax(peak_values))
     station_x = float(x_obs_p[max_idx])
     station_y = float(y_obs_p[max_idx])
     wind_u = float(u_obs_mps[max_idx])
@@ -394,8 +406,12 @@ def _compute_source_initial_position(
     metadata = {
         "mode": mode,
         "reason": reason,
+        "peak_value_mode": peak_value_mode,
         "max_observation_index": max_idx,
         "max_observation_fit": float(c_obs[max_idx]),
+        "max_observation_raw": float(c_obs_raw[max_idx]) if c_obs_raw is not None else None,
+        "peak_station": str(station_labels[max_idx]) if station_labels is not None else None,
+        "peak_time": str(time_labels[max_idx]) if time_labels is not None else None,
         "station_x_m": station_x,
         "station_y_m": station_y,
         "wind_u_mps": wind_u,
@@ -645,6 +661,9 @@ def run(
         source_x_max_p=source_x_max_p,
         source_y_min_p=source_y_min_p,
         source_y_max_p=source_y_max_p,
+        c_obs_raw=c_obs_raw,
+        station_labels=obs_station_labels,
+        time_labels=obs_time_labels,
     )
 
     # Scale wind to match normalized coordinates
@@ -818,6 +837,10 @@ def run(
         f"mode={source_init_metadata['mode']}, "
         f"x={source_init_metadata['x_m']:.1f} m, "
         f"y={source_init_metadata['y_m']:.1f} m, "
+        f"peak_mode={source_init_metadata.get('peak_value_mode', 'fit')}, "
+        f"peak_station={source_init_metadata.get('peak_station')}, "
+        f"peak_time={source_init_metadata.get('peak_time')}, "
+        f"max_raw={source_init_metadata.get('max_observation_raw') or 0.0:.3f}, "
         f"max_fit={source_init_metadata.get('max_observation_fit', 0.0):.3f}"
     )
     if FIELD_MODE == "recurrent_pde":

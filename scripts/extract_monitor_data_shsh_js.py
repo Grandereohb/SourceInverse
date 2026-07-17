@@ -18,15 +18,15 @@ DEFAULT_WIND_NAME = "wind.xlsx"
 # Manual Inputs
 # =========================
 # INPUT_FILE_PATH: source workbook path. Relative paths are resolved from the repo root.
-INPUT_FILE_PATH = 'data/shsh_js/自动审核小时数据_标准单位_2025-10-16 00_00_00_2026-04-16 12_00_00.xlsx'
+INPUT_FILE_PATH = 'data/shsh_js/自动审核小时数据_标准单位_2026-05-15 00_00_00_2026-06-14 23_00_00.xlsx'
 # START_TIME / END_TIME: inclusive extraction time range.
-START_TIME = '2026-04-09 07:00:00'
-END_TIME = '2026-04-09 19:00:00'
+START_TIME = '2026-06-13 00:00:00'
+END_TIME = '2026-06-13 13:00:00'
 # TARGET_POLLUTANT: pollutant column name to extract.
-TARGET_POLLUTANT = '硫化氢(H₂S)'
+TARGET_POLLUTANT = '乙烯'
 # WIND_STATION_NAME: use this station sheet's wind direction/speed to build wind.xlsx.
 # Leave empty to keep the old behavior: average wind from all station sheets.
-WIND_STATION_NAME = '上石化园区卫四路站'
+WIND_STATION_NAME = '上石化边界卫二路站'
 # OUTPUT_FOLDER:
 # - empty string: save directly into data/
 # - relative path: save into data/<OUTPUT_FOLDER>/
@@ -62,6 +62,20 @@ def clean_station_name(sheet_name: str) -> str:
     for pattern in SHEET_SUFFIX_PATTERNS:
         name = re.sub(pattern, "", name)
     return name.strip()
+
+
+def is_tagged_sheet(sheet_name: str) -> bool:
+    text = str(sheet_name)
+    return "带标识" in text or "甯︽爣璇" in text or "甫鏍囪瘑" in text
+
+
+def unique_station_sheets(sheet_names: list[str]) -> list[tuple[str, str]]:
+    selected: dict[str, str] = {}
+    for sheet_name in sorted(sheet_names, key=is_tagged_sheet):
+        station_name = clean_station_name(sheet_name)
+        if station_name not in selected:
+            selected[station_name] = sheet_name
+    return [(station_name, sheet_name) for station_name, sheet_name in selected.items()]
 
 
 def station_name_matches(station_name: str, target_station_name: str | None) -> bool:
@@ -187,8 +201,7 @@ def build_concentration_table(
     station_frames: list[pd.DataFrame] = []
     missing_stations: list[str] = []
 
-    for sheet_name in workbook.sheet_names:
-        station_name = clean_station_name(sheet_name)
+    for station_name, sheet_name in unique_station_sheets(workbook.sheet_names):
         df = pd.read_excel(workbook, sheet_name=sheet_name)
         df = filter_time_range(df, start_time, end_time)
         if df.empty:
@@ -230,8 +243,7 @@ def build_wind_table(
     wind_frames: list[pd.DataFrame] = []
     matched_station = False
 
-    for sheet_name in workbook.sheet_names:
-        station_name = clean_station_name(sheet_name)
+    for station_name, sheet_name in unique_station_sheets(workbook.sheet_names):
         if not station_name_matches(station_name, wind_station_name):
             continue
         matched_station = True
@@ -257,7 +269,7 @@ def build_wind_table(
         if wind_station_name is not None and str(wind_station_name).strip():
             if not matched_station:
                 available = ", ".join(
-                    clean_station_name(s) for s in workbook.sheet_names
+                    station_name for station_name, _ in unique_station_sheets(workbook.sheet_names)
                 )
                 raise ValueError(
                     "Failed to build wind table: wind station "

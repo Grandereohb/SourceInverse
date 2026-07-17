@@ -1,9 +1,9 @@
 # =========================
 # Data Paths
 # =========================
-SITE_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/shsh_js/sites.xlsx'
-CONC_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/shsh_js/concentration.xlsx'
-WIND_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/shsh_js/wind.xlsx'
+SITE_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/sites.xlsx'
+CONC_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/concentration.xlsx'
+WIND_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/wind.xlsx'
 # =========================
 # Model / Device
 # =========================
@@ -15,7 +15,7 @@ FIELD_MODE = "recurrent_pde"
 # Output
 # =========================
 OUTPUT_DIR = r"C:\Document\phd\SourceInverse\SourceInverse\result"
-TARGET_POLLUTANT = '硫化氢(H₂S)'
+TARGET_POLLUTANT = '乙苯'
 MAKE_PLOTS = True
 
 # =========================
@@ -48,6 +48,7 @@ DOMAIN_PAD_M = 500.0
 SOURCE_POSITION_PAD_M = 500.0
 SOURCE_INIT_MODE = "max_station_upwind"  # "center" or "max_station_upwind"
 SOURCE_INIT_UPWIND_DISTANCE_M = 200.0
+SOURCE_INIT_PEAK_VALUE = "raw"  # "raw" uses observed high-value peak, "fit" uses residual peak
 SIGMA_SRC = 0.05
 D_MIN_PHYS = 500.0
 
@@ -66,10 +67,10 @@ RECURRENT_INITIAL_RELEASE_FRACTION = 1.0
 # =========================
 Q_MODE = "smooth_time"  # "neural", "smooth_time", or "piecewise"
 Q_SEGMENT_LENGTH = 6
-Q_SMOOTH_WEIGHT = 0.01
-Q_L2_WEIGHT = 0.001
-Q_MIN = 0.2
-Q_MAX = 20.0
+Q_SMOOTH_WEIGHT = 0.0
+Q_L2_WEIGHT = 0.0001
+Q_MIN = 0.05
+Q_MAX = 100.0
 
 # These remain for PINN model compatibility. They are frozen in recurrent_pde mode.
 PLUME_MAX = None

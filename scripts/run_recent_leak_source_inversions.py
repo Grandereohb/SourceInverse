@@ -20,23 +20,23 @@ ABNORMAL_DIR = DATA_DIR / "abnormal_high_monitor_data"
 PINN_SCRIPT = REPO_ROOT / "pinn_source" / "pinn_source_pinn.py"
 PINN_CONFIG = REPO_ROOT / "pinn_source" / "config.py"
 
-INPUT_FILE_PATH = ABNORMAL_DIR / "abnormal_high_monitoar_data.xlsx"
+# INPUT_FILE_PATH = ABNORMAL_DIR / "abnormal_high_vocs_odorous_gases.xlsx"
 
-MONITOR_INPUT_PATH = (
-    DATA_DIR
-    / "shsh_js"
-    / "自动审核小时数据_标准单位_2025-10-16 00_00_00_2026-04-16 12_00_00.xlsx"
-)
+# MONITOR_INPUT_PATH = (
+#     DATA_DIR
+#     / "shsh_js"
+#     / "自动审核小时数据_标准单位_2026-05-15 00_00_00_2026-06-14 23_00_00.xlsx"
+# )
 
-EXTRACT_SCRIPT_KEY = "shsh_js"
-EXTRACT_OUTPUT_FOLDER = "shsh_js"
+# EXTRACT_SCRIPT_KEY = "shsh_js"
+# EXTRACT_OUTPUT_FOLDER = "shsh_js"
 
 # Abnormal-high event workbook to traverse. This must point to a concrete Excel
 # file with an `abnormal_high_records` sheet, not just a directory.
-# INPUT_FILE_PATH = ABNORMAL_DIR / "abnormal_high_monitor_data_jjj_may.xlsx"
-# MONITOR_INPUT_PATH = DATA_DIR / "jjj" / "2026年03-04-05月小时数据" / "5月小时数据"
-# EXTRACT_SCRIPT_KEY = "jjj"
-# EXTRACT_OUTPUT_FOLDER = ""
+INPUT_FILE_PATH = ABNORMAL_DIR / "abnormal_high_monitor_data_jjj_may.xlsx"
+MONITOR_INPUT_PATH = DATA_DIR / "jjj" / "2026年03-04-05月小时数据" / "5月小时数据"
+EXTRACT_SCRIPT_KEY = "jjj"
+EXTRACT_OUTPUT_FOLDER = ""
 
 
 # =========================
@@ -76,9 +76,6 @@ def resolve_extract_script(output_folder: str) -> Path:
             return path
     searched = "\n".join(f"- {path}" for path in candidates)
     raise FileNotFoundError(f"No extract monitor script found. Searched:\n{searched}")
-
-
-EXTRACT_SCRIPT = resolve_extract_script(EXTRACT_SCRIPT_KEY)
 
 
 def safe_text(value) -> str:
@@ -204,6 +201,21 @@ def python_config_value(value: str | Path) -> str:
     return str(value)
 
 
+def resolve_repo_path(path: str | Path) -> Path:
+    out = Path(path)
+    if not out.is_absolute():
+        out = (REPO_ROOT / out).resolve()
+    return out
+
+
+def display_path_for_config(path: str | Path) -> str:
+    out = resolve_repo_path(path)
+    try:
+        return out.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return out.as_posix()
+
+
 def replace_python_string_assignment(text: str, name: str, value: str | Path) -> str:
     pattern = (
         rf"^{name}\s*=\s*"
@@ -217,17 +229,20 @@ def replace_python_string_assignment(text: str, name: str, value: str | Path) ->
     return text
 
 
-def resolved_extract_output_dir() -> Path:
-    output = Path(EXTRACT_OUTPUT_FOLDER)
+def resolved_extract_output_dir(
+    extract_script_key: str = EXTRACT_SCRIPT_KEY,
+    extract_output_folder: str | Path = EXTRACT_OUTPUT_FOLDER,
+) -> Path:
+    output = Path(extract_output_folder)
     if output.is_absolute():
         return output
 
-    if EXTRACT_SCRIPT_KEY == "jjj":
+    if extract_script_key == "jjj":
         base_dir = DATA_DIR / "jjj"
     else:
         base_dir = DATA_DIR
 
-    if not str(EXTRACT_OUTPUT_FOLDER).strip():
+    if not str(extract_output_folder).strip():
         return base_dir
     return base_dir / output
 
@@ -266,9 +281,15 @@ def parse_extracted_input_paths(log_path: Path) -> dict[str, Path]:
 
 
 def update_pinn_config_inputs(
-    leak: dict, extracted_paths: dict[str, Path] | None = None
+    leak: dict,
+    extracted_paths: dict[str, Path] | None = None,
+    extract_script_key: str = EXTRACT_SCRIPT_KEY,
+    extract_output_folder: str | Path = EXTRACT_OUTPUT_FOLDER,
 ) -> None:
-    data_dir = resolved_extract_output_dir()
+    data_dir = resolved_extract_output_dir(
+        extract_script_key=extract_script_key,
+        extract_output_folder=extract_output_folder,
+    )
     replacements = {
         "SITE_PATH": data_dir / "sites.xlsx",
         "CONC_PATH": data_dir / "concentration.xlsx",
@@ -284,17 +305,22 @@ def update_pinn_config_inputs(
     PINN_CONFIG.write_text(text, encoding="utf-8")
 
 
-def update_extract_monitor_inputs(leak: dict) -> None:
-    text = EXTRACT_SCRIPT.read_text(encoding="utf-8")
+def update_extract_monitor_inputs(
+    leak: dict,
+    extract_script: Path,
+    monitor_input_path: str | Path,
+    extract_output_folder: str | Path,
+) -> None:
+    text = extract_script.read_text(encoding="utf-8")
     replacements = {
         "START_TIME": leak["start_time"].strftime("%Y-%m-%d %H:%M:%S"),
         "END_TIME": leak["end_time"].strftime("%Y-%m-%d %H:%M:%S"),
         "TARGET_POLLUTANT": leak["pollutant"],
         "WIND_STATION_NAME": leak["wind_station"],
-        "OUTPUT_FOLDER": EXTRACT_OUTPUT_FOLDER,
+        "OUTPUT_FOLDER": extract_output_folder,
     }
 
-    monitor_input_value = MONITOR_INPUT_PATH.relative_to(REPO_ROOT).as_posix()
+    monitor_input_value = display_path_for_config(monitor_input_path)
     input_patterns = [
         ("INPUT_FILE_PATH", rf'^INPUT_FILE_PATH\s*=\s*(?:r)?["\'].*?["\']\s*$'),
         ("MONITOR_DATA_DIR", rf'^MONITOR_DATA_DIR\s*=\s*(?:r)?["\'].*?["\']\s*$'),
@@ -306,16 +332,16 @@ def update_extract_monitor_inputs(leak: dict) -> None:
             break
     else:
         raise ValueError(
-            f"Could not update INPUT_FILE_PATH or MONITOR_DATA_DIR in {EXTRACT_SCRIPT}"
+            f"Could not update INPUT_FILE_PATH or MONITOR_DATA_DIR in {extract_script}"
         )
 
     for name, value in replacements.items():
         try:
             text = replace_python_string_assignment(text, name, value)
         except ValueError as exc:
-            raise ValueError(f"Could not update {name} in {EXTRACT_SCRIPT}") from exc
+            raise ValueError(f"Could not update {name} in {extract_script}") from exc
 
-    EXTRACT_SCRIPT.write_text(text, encoding="utf-8")
+    extract_script.write_text(text, encoding="utf-8")
 
 
 def run_step(command: list[str], log_path: Path) -> None:
@@ -359,12 +385,18 @@ def run_recent_leak_source_inversions(
     start_rank: int | None = None,
     pollutant_contains: str | None = POLLUTANT_CONTAINS,
     input_file_path: str | Path = INPUT_FILE_PATH,
+    monitor_input_path: str | Path = MONITOR_INPUT_PATH,
+    extract_script_key: str = EXTRACT_SCRIPT_KEY,
+    extract_output_folder: str | Path = EXTRACT_OUTPUT_FOLDER,
 ) -> Path:
-    abnormal_path = Path(input_file_path)
-    if not abnormal_path.is_absolute():
-        abnormal_path = (REPO_ROOT / abnormal_path).resolve()
+    abnormal_path = resolve_repo_path(input_file_path)
     if not abnormal_path.exists():
         raise FileNotFoundError(f"Abnormal event workbook not found: {abnormal_path}")
+    monitor_input = resolve_repo_path(monitor_input_path)
+    if not monitor_input.exists():
+        raise FileNotFoundError(f"Monitor input path not found: {monitor_input}")
+    extract_script = resolve_extract_script(extract_script_key)
+
     all_leaks = build_leaks(abnormal_path)
     selected_leaks = select_leaks(
         leaks=all_leaks,
@@ -418,14 +450,24 @@ def run_recent_leak_source_inversions(
                 f"wind_station={leak['wind_station']}",
             )
 
-            update_extract_monitor_inputs(leak)
+            update_extract_monitor_inputs(
+                leak,
+                extract_script=extract_script,
+                monitor_input_path=monitor_input,
+                extract_output_folder=extract_output_folder,
+            )
             extract_log_path = leak_dir / "extract_monitor_data.log"
             run_step(
-                [sys.executable, str(EXTRACT_SCRIPT)],
+                [sys.executable, str(extract_script)],
                 extract_log_path,
             )
             extracted_paths = parse_extracted_input_paths(extract_log_path)
-            update_pinn_config_inputs(leak, extracted_paths=extracted_paths)
+            update_pinn_config_inputs(
+                leak,
+                extracted_paths=extracted_paths,
+                extract_script_key=extract_script_key,
+                extract_output_folder=extract_output_folder,
+            )
             summary_rows[-1]["site_path"] = str(extracted_paths["SITE_PATH"])
             summary_rows[-1]["concentration_path"] = str(extracted_paths["CONC_PATH"])
             summary_rows[-1]["wind_path"] = str(extracted_paths["WIND_PATH"])
@@ -496,6 +538,31 @@ def parse_args() -> argparse.Namespace:
             "`abnormal_high_records` sheet."
         ),
     )
+    parser.add_argument(
+        "--monitor-input",
+        default=str(MONITOR_INPUT_PATH),
+        help=(
+            "Raw monitor data source for the extraction script. For SHSH-JS this "
+            "is the source workbook; for JJJ this is the station-workbook directory."
+        ),
+    )
+    parser.add_argument(
+        "--extract-script-key",
+        default=EXTRACT_SCRIPT_KEY,
+        help=(
+            "Extraction script key. Example: shsh_js -> "
+            "scripts/extract_monitor_data_shsh_js.py, jjj -> "
+            "scripts/extract_monitor_data_jjj.py."
+        ),
+    )
+    parser.add_argument(
+        "--extract-output-folder",
+        default=str(EXTRACT_OUTPUT_FOLDER),
+        help=(
+            "Output folder passed to the extraction script. Empty uses that "
+            "script's default output directory."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -508,6 +575,9 @@ def main() -> None:
         start_rank=args.start_rank,
         pollutant_contains=args.pollutant_contains,
         input_file_path=args.input_file,
+        monitor_input_path=args.monitor_input,
+        extract_script_key=args.extract_script_key,
+        extract_output_folder=args.extract_output_folder,
     )
     safe_print(f"Saved run summary: {summary_path}")
 

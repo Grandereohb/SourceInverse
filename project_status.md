@@ -2078,6 +2078,111 @@ Validation:
   - `WIND_PATH = data/shsh_js/wind.xlsx`
   - `SITE_PATH = data/shsh_js/sites.xlsx`
 
+### 2026-07-14 SHSH-JS VOCs and Odorous Gas Abnormal Workbook
+
+User requested extracting VOCs plus odorous gases (`氨气` and `硫化氢`) from:
+
+- `data/abnormal_high_monitor_data/abnormal_high_monitoar_data.xlsx`
+
+Generated:
+
+- `data/abnormal_high_monitor_data/abnormal_high_vocs_odorous_gases.xlsx`
+
+Filtering:
+
+- Kept VOC/organic pollutant records.
+- Kept odorous gas records:
+  - `氨气`
+  - `硫化氢(H₂S)`
+- Excluded inorganic/reactive gas records such as:
+  - `一氧化氮(NO)`
+  - `二氧化氮(NO₂)`
+  - `二氧化硫(SO₂)`
+  - `臭氧(O₃)`
+  - reference-condition rows.
+
+Output summary:
+
+- `abnormal_high_records`: 1006 rows, 32 pollutants.
+- `pollutant_thresholds`: 61 rows, 61 pollutants.
+
+### 2026-07-15 Batch Runner Monitor Input CLI
+
+User requested that when running `scripts/run_recent_leak_source_inversions.py`, the extraction scripts should automatically update their source input from the parameters already passed to the batch runner.
+
+Problem:
+
+- The batch runner had `--input-file` for the abnormal event workbook.
+- The raw monitor source (`MONITOR_INPUT_PATH`) was still only a top-level constant.
+- SHSH-JS extractors use `INPUT_FILE_PATH`.
+- JJJ extractors use `MONITOR_DATA_DIR`.
+
+Changed in `scripts/run_recent_leak_source_inversions.py`:
+
+- Added CLI arguments:
+  - `--monitor-input`
+  - `--extract-script-key`
+  - `--extract-output-folder`
+- `run_recent_leak_source_inversions(...)` now accepts these values and resolves the selected extractor at run time.
+- `update_extract_monitor_inputs(...)` now receives the selected extractor path, raw monitor input path, and extractor output folder explicitly.
+- The same update function still supports both extractor input styles:
+  - `INPUT_FILE_PATH` for SHSH-JS / single-workbook extractors.
+  - `MONITOR_DATA_DIR` for JJJ / directory extractors.
+- Added robust path formatting so repo-local paths are written as relative POSIX paths and external absolute paths remain absolute.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile scripts\run_recent_leak_source_inversions.py` passed.
+- `--help` shows the new parameters.
+- Smoke check confirmed extractor resolution for `shsh_js` and `jjj`.
+
+### 2026-07-15 SHSH-JS Duplicate Station Sheet Fix
+
+User's batch run failed at event 13 while launching PINN after extraction.
+
+Diagnosis:
+
+- The failing extracted `data/shsh_js/concentration.xlsx` had station columns like:
+  - `上石化边界卫二路站_x`
+  - `上石化边界卫二路站_y`
+- This is not a valid PINN concentration input format.
+- The SHSH-JS source workbook used for May-June data contains both ordinary station sheets and `(带标识)` station sheets.
+- `clean_station_name(...)` normalizes both to the same station name.
+- The old extraction loop merged both sheets, so pandas added `_x` / `_y` suffixes for duplicate station columns.
+
+Changed in `scripts/extract_monitor_data_shsh_js.py`:
+
+- Added `is_tagged_sheet(...)`.
+- Added `unique_station_sheets(...)`.
+- `build_concentration_table(...)` now processes only one sheet per cleaned station name, preferring `(带标识)` sheets.
+- `build_wind_table(...)` uses the same unique station sheet selection, preventing duplicated wind samples from ordinary/tagged duplicate sheets.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile scripts\extract_monitor_data_shsh_js.py scripts\run_recent_leak_source_inversions.py` passed.
+- Re-running the extraction for the failing event succeeded.
+- The regenerated `data/shsh_js/concentration.xlsx` has normal station columns with no `_x` / `_y` suffixes.
+
+### 2026-07-15 SHSH-JS VOCs and Odorous Gas Workbook Regeneration
+
+User again requested extracting VOCs plus odorous gases (`氨气` and `硫化氢`) from:
+
+- `data/abnormal_high_monitor_data/abnormal_high_monitoar_data.xlsx`
+
+Regenerated:
+
+- `data/abnormal_high_monitor_data/abnormal_high_vocs_odorous_gases.xlsx`
+
+Filtering:
+
+- Kept VOC/organic pollutant records plus odorous gases.
+- Excluded inorganic/reactive gases and reference-condition rows containing `NO`, `SO`, or `O₃/O3`, and `-参` rows.
+
+Output summary:
+
+- `abnormal_high_records`: 385 rows, 25 pollutants.
+- `pollutant_thresholds`: 61 rows, 61 pollutants.
+
 ### 2026-07-05 Plot Display Issue Check and Show Blocking Fix
 
 User reported that after the diffusion GIF visualization change, no images were displaying and asked whether the change was wrong.
