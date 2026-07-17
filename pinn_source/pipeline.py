@@ -110,6 +110,11 @@ from q_parameterization import (
     export_q_time_series,
 )
 from source_landscape import compute_source_loss_landscape
+from transport_units import (
+    normalize_decay_per_hour,
+    normalize_diffusivity_m2s,
+    normalize_velocity_mps,
+)
 
 
 def _wind_dir_from_uv(u, v, is_from=True):
@@ -666,9 +671,9 @@ def run(
         time_labels=obs_time_labels,
     )
 
-    # Scale wind to match normalized coordinates
-    u_obs = u_obs * T / L * WIND_SCALE
-    v_obs = v_obs * T / L * WIND_SCALE
+    # Convert measured m/s wind to normalized distance per normalized time.
+    u_obs = normalize_velocity_mps(u_obs, T, L, factor=WIND_SCALE)
+    v_obs = normalize_velocity_mps(v_obs, T, L, factor=WIND_SCALE)
 
     # Normalized training bounds
     x_min, x_max = (x_min_p - x0) / L, (x_max_p - x0) / L
@@ -872,8 +877,9 @@ def run(
             t_values=t_w,
             u_values=u_w,
             v_values=v_w,
-            d_min_norm=D_MIN_PHYS * T / (L**2),
-            d_scale_norm=T / (L**2),
+            d_min_norm=normalize_diffusivity_m2s(D_MIN_PHYS, T, L),
+            d_scale_norm=normalize_diffusivity_m2s(1.0, T, L),
+            decay_norm=normalize_decay_per_hour(RECURRENT_DECAY, T),
         )
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     if not trainable_params:
@@ -901,6 +907,13 @@ def run(
         f"landscape_step={SOURCE_LANDSCAPE_STEP_M}m, "
         f"gif={DIFFUSION_N_FRAMES}x{DIFFUSION_NX}x{DIFFUSION_NY}"
     )
+    if FIELD_MODE == "recurrent_pde":
+        print(
+            "Recurrent transport settings: "
+            f"wind_factor={WIND_SCALE:.3f}, D_min_m2s={D_MIN_PHYS:.3f}, "
+            f"decay_per_hour={RECURRENT_DECAY:.3f}, "
+            f"substeps={RECURRENT_SUBSTEPS}"
+        )
 
     # Per-time wind vectors for time-sliced axis-loss on observation points
     t_w_t = torch.tensor(t_w, dtype=torch.float32, device=device).view(-1)
@@ -1570,6 +1583,10 @@ def run(
                 "substeps": int(RECURRENT_SUBSTEPS),
                 "source_scale": float(RECURRENT_SOURCE_SCALE),
                 "decay": float(RECURRENT_DECAY),
+                "decay_units": "1/hour",
+                "decay_norm": float(getattr(model, "recurrent_decay_norm", 0.0)),
+                "wind_factor": float(WIND_SCALE),
+                "diffusion_units": "m^2/s",
                 "initial_release_fraction": float(RECURRENT_INITIAL_RELEASE_FRACTION),
                 "d_min_norm": float(getattr(model, "recurrent_d_min_norm", 0.0)),
                 "d_scale_norm": float(getattr(model, "recurrent_d_scale_norm", 1.0)),

@@ -25,7 +25,8 @@ WIND_DIR_IS_FROM = True
 ENABLE_WIND_VECTOR_SMOOTHING = True
 WIND_SMOOTH_WINDOW = 5
 WIND_SMOOTH_LOW_SPEED_MPS = 0.8
-WIND_SCALE = 10.0
+# Fraction of the measured hourly mean wind used by the effective transport model.
+WIND_SCALE = 0.25
 
 # =========================
 # Training
@@ -47,10 +48,10 @@ DOMAIN_PAD_M = 500.0
 # Positive values allow source candidates outside the station envelope.
 SOURCE_POSITION_PAD_M = 500.0
 SOURCE_INIT_MODE = "max_station_upwind"  # "center" or "max_station_upwind"
-SOURCE_INIT_UPWIND_DISTANCE_M = 200.0
+SOURCE_INIT_UPWIND_DISTANCE_M = 1000.0
 SOURCE_INIT_PEAK_VALUE = "raw"  # "raw" uses observed high-value peak, "fit" uses residual peak
 SIGMA_SRC = 0.05
-D_MIN_PHYS = 500.0
+D_MIN_PHYS = 1.0  # m^2/s
 
 # =========================
 # Recurrent PDE Plume
@@ -59,7 +60,7 @@ RECURRENT_GRID_NX = 36
 RECURRENT_GRID_NY = 36
 RECURRENT_SUBSTEPS = 1
 RECURRENT_SOURCE_SCALE = 1.0
-RECURRENT_DECAY = 0.15
+RECURRENT_DECAY = 0.50  # 1/hour
 RECURRENT_INITIAL_RELEASE_FRACTION = 1.0
 
 # =========================

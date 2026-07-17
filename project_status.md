@@ -2497,3 +2497,252 @@ Expected effect:
 Validation:
 
 - `.venv_clean\Scripts\python.exe -m py_compile pinn_source\viz.py` passed.
+
+### 2026-07-15 SHSH Batch Station Extraction Diagnosis
+
+User found recent `result` folders only saved one station in `concentration.xlsx`.
+
+Findings:
+
+- Recent result inputs such as `20260715_181913_硫化氢(H₂S)` and `20260715_180457_乙烯` already contain only one concentration station column before PINN runs.
+- The station is `上石化边界卫二路站`; `sites.xlsx` still contains 10 stations.
+- The batch logs show `run_recent_leak_source_inversions.py` passed events after `2026-06-14 23:00:00` to `scripts/extract_monitor_data_shsh_js.py`.
+- In the monitor workbook `data/shsh_js/自动审核小时数据_标准单位_2026-05-15 00_00_00_2026-06-14 23_00_00.xlsx`, only sheet `上石化边界卫二路站` has rows after `2026-06-14 23:00:00`; all other non-tagged and tagged station sheets stop at `2026-06-14 23:00:00`.
+- The filtered abnormal workbook also has only `上石化边界卫二路站` records after `2026-06-14 23:00:00`.
+
+Conclusion:
+
+- The one-station result is produced at the monitor-data extraction stage by `scripts/extract_monitor_data_shsh_js.py`, but the immediate cause is the source monitor workbook coverage: later event windows only have data for one station.
+- `run_recent_leak_source_inversions.py` is not dropping stations in this case; it copies the extracted one-station `concentration.xlsx` into each result folder.
+- To get multi-station results for late June / July events, provide or build a monitor input workbook where all station sheets cover those dates, or restrict the batch to event windows where all station sheets have data.
+
+### 2026-07-15 SHSH Tagged Sheet Priority Fix
+
+User's one-event batch failed during `scripts/extract_monitor_data_shsh_js.py` for:
+
+- pollutant: `乙烯`
+- window: `2026-07-14 19:00:00 -> 2026-07-15 08:00:00`
+- wind station: `上石化边界卫二路站`
+
+Error:
+
+- `ValueError: Failed to build concentration table: no rows matched the requested time range.`
+
+Cause:
+
+- The previous duplicate-sheet fix selected `(带标识)` sheets first.
+- In the SHSH May-June monitor workbook, `(带标识)` sheets stop at `2026-06-14 23:00:00`.
+- The ordinary `上石化边界卫二路站` sheet continues to `2026-07-15 12:00:00`.
+- For July events, choosing the tagged sheet made the extraction window empty.
+
+Changed:
+
+- `scripts/extract_monitor_data_shsh_js.py` now prefers ordinary sheets first and uses tagged sheets only as fallback for the same cleaned station name.
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile scripts\extract_monitor_data_shsh_js.py scripts\run_recent_leak_source_inversions.py` passed.
+- Running `scripts/extract_monitor_data_shsh_js.py` for the failing July 14 window succeeded.
+- Generated `data/shsh_js/concentration.xlsx` and `data/shsh_js/wind.xlsx`.
+- The generated concentration input still contains only `上石化边界卫二路站` because the source workbook only has this station after `2026-06-14 23:00:00`.
+
+### 2026-07-15 Result 20260715_185621 Station Coverage Check
+
+User asked why `result/20260715_185621_乙烯` still has only one station and whether this is caused by raw data coverage.
+
+Findings:
+
+- `result/20260715_185621_乙烯/concentration.xlsx` has 14 rows and only one station column:
+  - `上石化边界卫二路站`
+- Extraction log:
+  - input workbook: `data/shsh_js/自动审核小时数据_标准单位_2026-05-15 00_00_00_2026-06-14 23_00_00.xlsx`
+  - time range: `2026-07-14 19:00:00 -> 2026-07-15 08:00:00`
+  - pollutant: `乙烯`
+- Raw monitor workbook check for this exact window:
+  - `上石化边界卫二路站`: 14 rows, has `乙烯`, 14 non-null values, max `379.39`
+  - all other ordinary and `(带标识)` station sheets: 0 rows in the window, although they have the `乙烯` column.
+- The filtered abnormal workbook also has matching rows only for `上石化边界卫二路站` in this window:
+  - `2026-07-15 01:00:00`, `284.17`
+  - `2026-07-15 02:00:00`, `379.39`
+
+Conclusion:
+
+- This result has one station because the original monitor workbook only contains one station with data in the requested July 14-15 window.
+- No extraction-script fix is needed for this case; multi-station results require a monitor input workbook whose other station sheets also cover that time window.
+
+### 2026-07-16 Source Initialization and Q Flexibility Update
+
+User reviewed `result/20260707京津冀` and raised two algorithm issues:
+
+- Source initialization should use the high-value station's wind at the high-value time, not an unrelated initial-window wind direction.
+- Sudden leakage can have large source-strength jumps, so Q should not be forced too smooth.
+
+Findings:
+
+- Previous source initialization in `pinn_source/pipeline.py` used the maximum fitting observation (`c_obs`) and the wind attached to that observation row.
+- Because training is on residuals when `TRAIN_ON_RESIDUAL=True`, the selected initialization peak could differ from the raw concentration peak.
+- The old log only printed `max_fit`, not the peak station/time, making it hard to verify which wind time was used.
+- Source optimization can still get stuck after initialization because the source is a single global `(xs, ys)` parameter, gradients can be weak when the plume misses the high-value station, source position is clamped to the source domain, and Q/Diffusion changes can partially compensate for source-position errors.
+
+Changed:
+
+- Added `SOURCE_INIT_PEAK_VALUE = "raw"` in `pinn_source/config.py`.
+- `pinn_source/pipeline.py` source initialization now defaults to selecting the raw observed concentration peak, then shifts that high-value station upwind using the wind vector at that exact observation time.
+- Source initialization metadata now records:
+  - `peak_value_mode`
+  - `peak_station`
+  - `peak_time`
+  - `max_observation_raw`
+  - `max_observation_fit`
+- Training log now prints these peak details in `Source initial position`.
+- Relaxed Q constraints:
+  - `Q_SMOOTH_WEIGHT: 0.01 -> 0.0`
+  - `Q_L2_WEIGHT: 0.001 -> 0.0001`
+  - `Q_MIN: 0.2 -> 0.05`
+  - `Q_MAX: 20.0 -> 100.0`
+
+Validation:
+
+- `.venv_clean\Scripts\python.exe -m py_compile pinn_source\config.py pinn_source\pipeline.py pinn_source\models\pinn.py` passed.
+
+### 2026-07-16 Distance Decay and Diffusion Ablation
+
+User selected the physical transport adjustment for the `20260716_120505` isopentane case: reduce lateral spreading and increase concentration decay with transport distance/time, without adding another loss term.
+
+Changed:
+
+- `D_MIN_PHYS: 500.0 -> 150.0`
+- `RECURRENT_DECAY: 0.15 -> 0.50`
+- Added an explicit recurrent transport settings line to the training log.
+
+Validation:
+
+- Syntax compilation and `git diff --check` passed.
+- Re-ran the saved case inputs from `result/20260716.../20260716_120505...` for 5000 epochs.
+- Test output: `result/decay_diffusion_ablation/20260716_182613_isopentane_D150_decay050`.
+- The log confirmed `D_min_phys=150.000`, `decay=0.500`, and `substeps=1`.
+
+Comparison against the original result:
+
+- Raw RMSE improved from `86.22` to `78.69`.
+- K1 raw peak fit ratio improved slightly from `0.531` to `0.552`.
+- Mean low-station RMSE was unchanged at approximately `3.28`.
+- Final source remained on the physically implausible left side of K1:
+  - baseline relative position: `dx=-764 m`, `dy=-149 m`
+  - adjusted relative position: `dx=-773 m`, `dy=-145 m`
+- Mean Q increased from `0.628` to `0.778`, and maximum Q increased from `1.610` to `2.262`.
+- Landscape best remained `636 m` from the trained source and on the local scan boundary.
+
+Conclusion:
+
+- Stronger decay and lower diffusion improve concentration fitting but do not solve the source-side error for this case.
+- The optimizer mainly compensates for stronger decay by increasing Q, while converging to nearly the same source location.
+- A physical feasible-source domain or source-side parameterization is still needed if the residential side of K1 must be excluded.
+
+### 2026-07-16 Mechanism Review Without a Feasible Source Region
+
+User ruled out a prescribed feasible-source region and asked whether the source-side error can be addressed through model parameters and transport mechanisms only. No code was changed in this review.
+
+Key findings:
+
+- Wind vectors are loaded and logged in `m/s`, while model time is converted to hours and then normalized.
+- The recurrent forward model currently scales wind as `u * T / L * WIND_SCALE` and omits the `3600 s/hour` conversion.
+- With `WIND_SCALE=10`, effective advection is only about `10/3600 = 0.28%` of the physical displacement implied by the measured wind speed.
+- This makes wind direction too weak to constrain source location, allowing the optimizer to move the source to the non-upwind side while Q and diffusion compensate.
+- Diffusion uses `D_MIN_PHYS * T / L^2`; if `D_MIN_PHYS` is intended in `m^2/s`, it also needs the seconds-per-hour conversion.
+- The explicit diffusion step silently clamps diffusion to its numerical stability limit. With a `36x36` grid and one substep per hourly interval, physically meaningful atmospheric diffusivity can be clipped heavily.
+- Diffusion is currently isotropic with one scalar D, while real plumes generally spread differently along and across the wind direction.
+- `SIGMA_SRC=0.05` is normalized by the domain length and represents a source kernel several hundred meters wide for this case; the coarse grid cannot resolve a much narrower source accurately.
+- Hourly free Q nodes with almost no regularization can compensate for transport-parameter changes, which explains why stronger decay increased Q but barely moved the source.
+
+Recommended priority:
+
+1. Correct advection units and replace the current empirical wind multiplier with a dimensionless effective-advection factor.
+2. Correct diffusion units and replace the stability clamp with a stable diffusion operator or adaptive substeps.
+3. Express source width in meters and use a grid that resolves that width.
+4. Use wind-aligned anisotropic diffusion with separate along-wind and cross-wind coefficients.
+5. Parameterize Q as one or two abrupt causal release pulses and use staged source-first, Q-second optimization to reduce Q/source compensation.
+
+This approach changes physical parameterization and numerical structure without adding a new observation-fitting loss or prescribing a source-feasible region.
+
+### 2026-07-16 Transport Unit and Numerical Mechanism Fix
+
+User approved implementing and testing the transport-mechanism corrections without a feasible-source region and without adding a loss term.
+
+Implemented:
+
+- Added `pinn_source/transport_units.py` to convert:
+  - wind from `m/s` to normalized displacement,
+  - diffusivity from `m^2/s` to normalized diffusion,
+  - first-order decay from `1/hour` to normalized inverse time.
+- Corrected wind normalization by including `3600 s/hour`.
+- Reinterpreted `WIND_SCALE` as a dimensionless effective-advection factor and selected `0.25` after testing `0.10`, `0.25`, and `0.50`.
+- Replaced the explicit Laplacian diffusion step and silent stability clipping with differentiable Gaussian diffusion.
+- Changed advection and diffusion boundaries from replicated/clamped values to open zero-outflow boundaries.
+- Set `D_MIN_PHYS=1.0 m^2/s`.
+- Set source initialization to `1000 m` upwind of the raw peak station at the raw peak time.
+- Defined recurrent decay in `1/hour`; tested `0.05`, `0.20`, and `0.50`, selecting `0.50/hour`.
+- Added transport parameter units and normalized values to logs and quality reports.
+
+Automated tests:
+
+- Added `tests/test_recurrent_transport.py`.
+- All four tests passed:
+  - physical unit normalization,
+  - wind-direction advection displacement,
+  - open-boundary outflow,
+  - Gaussian diffusion variance.
+
+Ablation findings:
+
+- Wind factor `0.25` had the best total RMSE among `0.10`, `0.25`, and `0.50`.
+- At wind factor `0.25`, increasing decay from `0.05/hour` to `0.50/hour` reduced M3 RMSE from `31.84` to approximately `8.1` while preserving the K1 peak.
+
+Final full validation:
+
+- Output: `result/transport_mechanism_final/20260716_205354_isopentane_transport_final`.
+- Training stopped at epoch `3268` and restored epoch `3068`.
+- Baseline to final comparison:
+  - total raw RMSE: `86.22 -> 21.10`
+  - K1 peak fit ratio: `0.531 -> 0.998`
+  - K1 RMSE: `172.30 -> 41.34`
+  - mean M1/M2/M3 RMSE: `3.28 -> 3.80`
+  - M3 RMSE: `6.62 -> 8.12`
+  - source relative to K1: `(-764 m, -149 m) -> (-35 m, +1063 m)`
+  - trained-to-landscape-best distance: `636 m -> 0 m`
+- The final source is effectively north/upwind of K1. Its remaining `35 m` west offset is much smaller than the current grid spacing and is not spatially resolvable as a meaningful left-side displacement.
+- The confidence-landscape boundary warning disappeared.
+- Remaining warnings concern raw RMSE and missed secondary station peaks; these are mainly associated with early M3 behavior that a single fixed source does not explain simultaneously with the dominant K1 event.
+
+### 2026-07-17 Wind Unit Conversion Explanation
+
+Explained the corrected wind normalization:
+
+- Input wind components are physical `m/s` values.
+- Observation time is first converted to hours, then normalized by the event duration `T_hours`.
+- Coordinates are normalized by the physical domain length `L_m`.
+- The recurrent model therefore uses
+  `u_norm = u_mps * 3600 * T_hours / L_m * WIND_SCALE`
+  and the same formula for `v_norm`.
+- `3600` converts seconds to hours, `T_hours` converts displacement over the full event to normalized time, and division by `L_m` converts meters to normalized distance.
+- `WIND_SCALE=0.25` is now a dimensionless effective-advection factor, not a substitute for the missing unit conversion.
+- The original implementation omitted `3600`, so its effective transport was only `10/3600` of the physical displacement despite using `WIND_SCALE=10`.
+- Source initialization still uses preserved raw `m/s` wind components, while only the recurrent forward solver receives normalized wind.
+
+### 2026-07-17 Observation Time Conversion Explanation
+
+Explained the time representation used by `pipeline.py`:
+
+- Excel time cells are loaded by pandas and converted to `pandas.Timestamp` with `pd.to_datetime` in both concentration and wind loaders.
+- Concentration and wind rows are merged using these timestamps before observations are built.
+- `obs[:, 2]` initially stores `row["time"].timestamp()`, a Unix/POSIX timestamp in seconds.
+- `t_obs_group` preserves that seconds representation for exact-time grouping.
+- Training time is then converted to relative hours with `(t_obs - min(t_obs)) / 3600`.
+- Finally, relative hours are divided by the event duration `T_hours`, producing dimensionless model time, normally in `[0, 1]`.
+- Original pandas timestamps are separately retained in `obs_time_labels` for reports, plots, and exported diagnostics.
+
+### 2026-07-17 Split Git Commits
+
+- Committed data preparation, batch inversion workflow, source initialization, and Q-range changes separately from transport-unit work.
+- Kept wind, diffusivity, decay normalization, recurrent boundary behavior, stable diffusion, and transport regression tests in a dedicated second commit.
+- Excluded generated debug logs and Python bytecode caches from both commits.

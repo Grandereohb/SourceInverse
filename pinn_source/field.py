@@ -2,7 +2,6 @@ import torch
 import torch.nn.functional as F
 
 from config import (
-    RECURRENT_DECAY,
     RECURRENT_GRID_NX,
     RECURRENT_GRID_NY,
     RECURRENT_INITIAL_RELEASE_FRACTION,
@@ -31,6 +30,7 @@ def configure_recurrent_context(
     v_values,
     d_min_norm=0.0,
     d_scale_norm=1.0,
+    decay_norm=0.0,
     nx=None,
     ny=None,
 ):
@@ -41,6 +41,7 @@ def configure_recurrent_context(
 
     model.recurrent_d_min_norm = float(d_min_norm)
     model.recurrent_d_scale_norm = float(d_scale_norm)
+    model.recurrent_decay_norm = float(decay_norm)
     model.recurrent_x_grid = torch.linspace(
         float(x_min), float(x_max), steps=nx, dtype=dtype, device=device
     )
@@ -80,6 +81,12 @@ def _sample_grid_bilinear(field, x_query, y_query, x_grid, y_grid):
     x_max = x_grid[-1]
     y_min = y_grid[0]
     y_max = y_grid[-1]
+    inside = (
+        (x_query >= x_min)
+        & (x_query <= x_max)
+        & (y_query >= y_min)
+        & (y_query <= y_max)
+    )
     gx = (x_query - x_min) / torch.clamp(x_max - x_min, min=1e-8) * (nx - 1)
     gy = (y_query - y_min) / torch.clamp(y_max - y_min, min=1e-8) * (ny - 1)
     gx = torch.clamp(gx, 0.0, float(nx - 1))
@@ -97,12 +104,13 @@ def _sample_grid_bilinear(field, x_query, y_query, x_grid, y_grid):
     f10 = flat[y0 * nx + x1].view(-1, 1)
     f01 = flat[y1 * nx + x0].view(-1, 1)
     f11 = flat[y1 * nx + x1].view(-1, 1)
-    return (
+    sampled = (
         (1.0 - wx) * (1.0 - wy) * f00
         + wx * (1.0 - wy) * f10
         + (1.0 - wx) * wy * f01
         + wx * wy * f11
     )
+    return sampled * inside.to(sampled.dtype).view(-1, 1)
 
 
 def _advect_field(field, x_grid, y_grid, x_mesh_flat, y_mesh_flat, u, v, dt):
@@ -114,19 +122,30 @@ def _advect_field(field, x_grid, y_grid, x_mesh_flat, y_mesh_flat, u, v, dt):
 def _diffuse_field(field, x_grid, y_grid, diffusion, dt):
     dx = torch.clamp(x_grid[1] - x_grid[0], min=1e-8)
     dy = torch.clamp(y_grid[1] - y_grid[0], min=1e-8)
-    padded = F.pad(field.view(1, 1, *field.shape), (1, 1, 1, 1), mode="replicate")[
-        0, 0
-    ]
-    center = padded[1:-1, 1:-1]
-    lap = (
-        (padded[1:-1, 2:] - 2.0 * center + padded[1:-1, :-2]) / (dx**2)
-        + (padded[2:, 1:-1] - 2.0 * center + padded[:-2, 1:-1]) / (dy**2)
+    diffusion_eff = torch.clamp(diffusion, min=1e-12)
+    sigma_x = torch.sqrt(2.0 * diffusion_eff * dt) / dx
+    sigma_y = torch.sqrt(2.0 * diffusion_eff * dt) / dy
+    sigma_max = torch.maximum(sigma_x, sigma_y)
+    radius = max(1, int(torch.ceil(4.0 * sigma_max.detach()).item()))
+    radius = min(radius, max(1, min(field.shape) - 1))
+
+    coords = torch.arange(
+        -radius,
+        radius + 1,
+        dtype=field.dtype,
+        device=field.device,
     )
-    stable_max = 0.22 * torch.minimum(dx**2, dy**2) / torch.clamp(dt, min=1e-8)
-    diffusion_eff = torch.clamp(
-        diffusion, min=0.0, max=float(stable_max.detach().cpu().item())
-    )
-    return torch.clamp(field + diffusion_eff * dt * lap, min=0.0)
+    kernel_x = torch.exp(-0.5 * (coords / torch.clamp(sigma_x, min=1e-4)) ** 2)
+    kernel_y = torch.exp(-0.5 * (coords / torch.clamp(sigma_y, min=1e-4)) ** 2)
+    kernel_x = (kernel_x / torch.clamp(kernel_x.sum(), min=1e-12)).view(1, 1, 1, -1)
+    kernel_y = (kernel_y / torch.clamp(kernel_y.sum(), min=1e-12)).view(1, 1, -1, 1)
+
+    blurred = field.view(1, 1, *field.shape)
+    blurred = F.pad(blurred, (radius, radius, 0, 0), mode="constant", value=0.0)
+    blurred = F.conv2d(blurred, kernel_x)
+    blurred = F.pad(blurred, (0, 0, radius, radius), mode="constant", value=0.0)
+    blurred = F.conv2d(blurred, kernel_y)
+    return torch.clamp(blurred[0, 0], min=0.0)
 
 
 def _source_grid(model, t_value, x_grid, y_grid, x_mesh, y_mesh, sigma_src):
@@ -198,7 +217,7 @@ def recurrent_plume_fields(model, sigma_src):
         + model.D() * float(getattr(model, "recurrent_d_scale_norm", 1.0))
     )
     substeps = max(1, int(RECURRENT_SUBSTEPS))
-    decay = max(float(RECURRENT_DECAY), 0.0)
+    decay = max(float(getattr(model, "recurrent_decay_norm", 0.0)), 0.0)
     source_scale = float(RECURRENT_SOURCE_SCALE)
 
     if t_values.numel() == 1:
