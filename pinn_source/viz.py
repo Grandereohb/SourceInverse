@@ -335,6 +335,7 @@ def diffusion_animation(
     n_frames=40,
     nx=120,
     ny=120,
+    fps=2,
     out_gif="diffusion.gif",
     show=True,
 ):
@@ -468,10 +469,11 @@ def diffusion_animation(
         ax.set_title(f"Diffusion Over Time (t={t_frames[i]:.2f} h)")
         return [im]
 
+    fps = max(float(fps), 0.1)
     ani = animation.FuncAnimation(
-        fig, frame_fn, frames=n_frames, interval=200, blit=False
+        fig, frame_fn, frames=n_frames, interval=1000.0 / fps, blit=False
     )
-    ani.save(out_gif, writer="pillow", fps=5)
+    ani.save(out_gif, writer="pillow", fps=fps)
     if show:
         plt.show(block=True)
     else:

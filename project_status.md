@@ -2746,3 +2746,19 @@ Explained the time representation used by `pipeline.py`:
 - Committed data preparation, batch inversion workflow, source initialization, and Q-range changes separately from transport-unit work.
 - Kept wind, diffusivity, decay normalization, recurrent boundary behavior, stable diffusion, and transport regression tests in a dedicated second commit.
 - Excluded generated debug logs and Python bytecode caches from both commits.
+
+### 2026-07-17 Source-Plume Alignment Analysis
+
+- Investigated cases where the animated plume maximum appears detached from the trained source.
+- Confirmed that a downwind maximum is physically possible, so the source should be the causal origin rather than the maximum of every transported frame.
+- Identified a recurrent-time alignment defect: the warmup advances the initial release by one full first interval but stores that result as the `t0` field, and the main loop then advances the same interval again.
+- Additional separation is amplified by one transport substep per observation interval, a coarse `36 x 36` grid, a broad normalized source kernel, and linear interpolation between discrete concentration fields in the GIF.
+- Recommended correcting time-state semantics and source integration first, then using adaptive transport substeps and exact frame-time simulation; add causal plume diagnostics instead of another fitting loss.
+
+### 2026-07-17 Recurrent Source-Time Alignment Fix
+
+- Replaced the transported warmup field mislabeled as `t0` with an unadvected initial release centered on the trained source.
+- Changed each recurrent interval to symmetric source integration: half of the source is injected before transport and half at the interval endpoint.
+- Evaluated `Q(t)` and source position at both substep endpoints so time-varying release remains aligned with the saved concentration state.
+- Added regression tests for the initial source-centered field and endpoint fresh-source mass.
+- Added `DIFFUSION_FPS` and reduced the default GIF playback speed from `5 fps` to `2 fps`.

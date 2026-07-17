@@ -1,9 +1,9 @@
 # =========================
 # Data Paths
 # =========================
-SITE_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/sites.xlsx'
-CONC_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/concentration.xlsx'
-WIND_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/wind.xlsx'
+SITE_PATH = "C:/Document/phd/SourceInverse/SourceInverse/data/jjj/sites.xlsx"
+CONC_PATH = "C:/Document/phd/SourceInverse/SourceInverse/data/jjj/concentration.xlsx"
+WIND_PATH = "C:/Document/phd/SourceInverse/SourceInverse/data/jjj/wind.xlsx"
 # =========================
 # Model / Device
 # =========================
@@ -15,7 +15,7 @@ FIELD_MODE = "recurrent_pde"
 # Output
 # =========================
 OUTPUT_DIR = r"C:\Document\phd\SourceInverse\SourceInverse\result"
-TARGET_POLLUTANT = '乙苯'
+TARGET_POLLUTANT = "乙苯"
 MAKE_PLOTS = True
 
 # =========================
@@ -49,7 +49,9 @@ DOMAIN_PAD_M = 500.0
 SOURCE_POSITION_PAD_M = 500.0
 SOURCE_INIT_MODE = "max_station_upwind"  # "center" or "max_station_upwind"
 SOURCE_INIT_UPWIND_DISTANCE_M = 1000.0
-SOURCE_INIT_PEAK_VALUE = "raw"  # "raw" uses observed high-value peak, "fit" uses residual peak
+SOURCE_INIT_PEAK_VALUE = (
+    "raw"  # "raw" uses observed high-value peak, "fit" uses residual peak
+)
 SIGMA_SRC = 0.05
 D_MIN_PHYS = 1.0  # m^2/s
 
@@ -142,4 +144,5 @@ SOURCE_LANDSCAPE_LEVELS = [0.5, 0.8, 0.95]
 DIFFUSION_N_FRAMES = 24
 DIFFUSION_NX = 140
 DIFFUSION_NY = 140
+DIFFUSION_FPS = 2
 ADD_BASELINE_TO_VIZ = True

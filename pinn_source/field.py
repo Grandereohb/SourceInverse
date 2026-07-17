@@ -160,8 +160,10 @@ def _source_grid(model, t_value, x_grid, y_grid, x_mesh, y_mesh, sigma_src):
 
 def _advance_recurrent_step(
     field,
-    source,
-    q_value,
+    source_start,
+    q_start,
+    source_end,
+    q_end,
     x_grid,
     y_grid,
     x_mesh_flat,
@@ -173,7 +175,8 @@ def _advance_recurrent_step(
     source_scale,
     dt,
 ):
-    field = field + source_scale * q_value * source * dt
+    half_dt = 0.5 * dt
+    field = field + source_scale * q_start * source_start * half_dt
     field = _advect_field(
         field,
         x_grid,
@@ -187,6 +190,7 @@ def _advance_recurrent_step(
     field = _diffuse_field(field, x_grid, y_grid, diffusion, dt)
     if decay > 0.0:
         field = field * torch.exp(-dt * decay)
+    field = field + source_scale * q_end * source_end * half_dt
     return field
 
 
@@ -228,45 +232,44 @@ def recurrent_plume_fields(model, sigma_src):
         fields.append(field)
         return torch.stack(fields, dim=0)
 
-    warmup_fraction = max(float(RECURRENT_INITIAL_RELEASE_FRACTION), 0.0)
-    if warmup_fraction > 0.0:
+    initial_release_fraction = max(float(RECURRENT_INITIAL_RELEASE_FRACTION), 0.0)
+    if initial_release_fraction > 0.0:
         first_dt_total = torch.clamp(t_values[1] - t_values[0], min=1e-6)
-        warmup_dt_total = first_dt_total * warmup_fraction
-        warmup_steps = max(1, int(round(substeps * warmup_fraction)))
-        warmup_dt = warmup_dt_total / warmup_steps
-        warmup_source = _source_grid(
+        initial_source = _source_grid(
             model, t_values[0], x_grid, y_grid, x_mesh, y_mesh, sigma_src
         )
-        warmup_q = model.Q(t_values[0].view(1, 1)).view(())
-        for _ in range(warmup_steps):
-            field = _advance_recurrent_step(
-                field,
-                warmup_source,
-                warmup_q,
-                x_grid,
-                y_grid,
-                x_mesh_flat,
-                y_mesh_flat,
-                u_values[0],
-                v_values[0],
-                diffusion,
-                decay,
-                source_scale,
-                warmup_dt,
-            )
+        initial_q = model.Q(t_values[0].view(1, 1)).view(())
+        field = (
+            field
+            + source_scale
+            * initial_q
+            * initial_source
+            * first_dt_total
+            * initial_release_fraction
+        )
 
     fields.append(field)
     for i in range(t_values.numel() - 1):
         t_i = t_values[i]
         dt_total = torch.clamp(t_values[i + 1] - t_i, min=1e-6)
         dt = dt_total / substeps
-        source = _source_grid(model, t_i, x_grid, y_grid, x_mesh, y_mesh, sigma_src)
-        q_i = model.Q(t_i.view(1, 1)).view(())
-        for _ in range(substeps):
+        for substep in range(substeps):
+            t_left = t_i + dt * substep
+            t_right = t_left + dt
+            source_left = _source_grid(
+                model, t_left, x_grid, y_grid, x_mesh, y_mesh, sigma_src
+            )
+            source_right = _source_grid(
+                model, t_right, x_grid, y_grid, x_mesh, y_mesh, sigma_src
+            )
+            q_left = model.Q(t_left.view(1, 1)).view(())
+            q_right = model.Q(t_right.view(1, 1)).view(())
             field = _advance_recurrent_step(
                 field,
-                source,
-                q_i,
+                source_left,
+                q_left,
+                source_right,
+                q_right,
                 x_grid,
                 y_grid,
                 x_mesh_flat,

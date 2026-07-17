@@ -41,6 +41,7 @@ from config import (
     DIFFUSION_N_FRAMES,
     DIFFUSION_NX,
     DIFFUSION_NY,
+    DIFFUSION_FPS,
     SOURCE_POSITION_PAD_M,
     SOURCE_INIT_MODE,
     SOURCE_INIT_UPWIND_DISTANCE_M,
@@ -905,7 +906,7 @@ def run(
         "Training speed settings: "
         f"epochs={EPOCHS}, field_mode={FIELD_MODE}, "
         f"landscape_step={SOURCE_LANDSCAPE_STEP_M}m, "
-        f"gif={DIFFUSION_N_FRAMES}x{DIFFUSION_NX}x{DIFFUSION_NY}"
+        f"gif={DIFFUSION_N_FRAMES}x{DIFFUSION_NX}x{DIFFUSION_NY}@{DIFFUSION_FPS}fps"
     )
     if FIELD_MODE == "recurrent_pde":
         print(
@@ -1804,6 +1805,7 @@ def run(
             n_frames=DIFFUSION_N_FRAMES,
             nx=DIFFUSION_NX,
             ny=DIFFUSION_NY,
+            fps=DIFFUSION_FPS,
             out_gif=str(output_dir / "diffusion.gif"),
             show=show_plots,
         )
