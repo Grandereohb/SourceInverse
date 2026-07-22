@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import torch.nn.functional as F
 import matplotlib as mpl
 import pandas as pd
 from matplotlib import animation
@@ -8,7 +9,7 @@ import matplotlib.pyplot as plt
 
 from geo_utils import latlon_to_xy, xy_to_latlon
 from config import ADD_BASELINE_TO_VIZ
-from field import predict_concentration
+from field import recurrent_plume_fields_at_times
 
 # Font config for CJK labels
 mpl.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "Arial Unicode MS"]
@@ -357,31 +358,34 @@ def diffusion_animation(
 
     xs_lin = np.linspace(data_x_min, data_x_max, nx)
     ys_lin = np.linspace(data_y_min, data_y_max, ny)
-    XX, YY = np.meshgrid(xs_lin, ys_lin)
 
-    # Use time range in hours
+    # Render-time states are solved by recurrent transport rather than blended
+    # between the coarser observation-time concentration fields.
     t_frames = np.linspace(t_min, t_max, n_frames)
+    t_frames_norm = (t_frames - t0) / T
+    u_frames = np.interp(t_frames_norm, t_w, u_w)
+    v_frames = np.interp(t_frames_norm, t_w, v_w)
 
-    # Precompute frames so we can choose a good global color scale
+    with torch.no_grad():
+        dense_fields = recurrent_plume_fields_at_times(
+            model,
+            sigma_src=sigma_src,
+            t_values=t_frames_norm,
+            u_values=u_frames,
+            v_values=v_frames,
+        )
+        display_fields = F.interpolate(
+            dense_fields.unsqueeze(1),
+            size=(ny, nx),
+            mode="bilinear",
+            align_corners=True,
+        )[:, 0]
+
     frames = []
-    for tf in t_frames:
-        tt = np.full_like(XX, tf)
-        xyt = np.stack([XX.ravel(), YY.ravel(), tt.ravel()], axis=1)
-        xyt[:, 0] = (xyt[:, 0] - x0) / L
-        xyt[:, 1] = (xyt[:, 1] - y0) / L
-        xyt[:, 2] = (xyt[:, 2] - t0) / T
-        xyt_t = torch.tensor(xyt, dtype=torch.float32, device=device)
-        u_tf = np.interp(tf, t_w, u_w)
-        v_tf = np.interp(tf, t_w, v_w)
-        u_t = torch.full((xyt_t.shape[0], 1), float(u_tf), dtype=torch.float32, device=device)
-        v_t = torch.full((xyt_t.shape[0], 1), float(v_tf), dtype=torch.float32, device=device)
-        with torch.no_grad():
-            cc = predict_concentration(
-                model, xyt_t, u_t, v_t, sigma_src=sigma_src
-            ).cpu().numpy().reshape(ny, nx)
-        cc = cc * c_scale
+    for i, cc_tensor in enumerate(display_fields):
+        cc = cc_tensor.cpu().numpy() * c_scale
         if ADD_BASELINE_TO_VIZ and baseline_w is not None:
-            cc = cc + float(np.interp(tf, t_w, baseline_w))
+            cc = cc + float(np.interp(t_frames_norm[i], t_w, baseline_w))
         cc = np.clip(cc, 0, None)  # for visualization
         frames.append(cc)
 

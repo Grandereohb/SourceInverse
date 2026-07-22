@@ -1,9 +1,9 @@
 # =========================
 # Data Paths
 # =========================
-SITE_PATH = "C:/Document/phd/SourceInverse/SourceInverse/data/jjj/sites.xlsx"
-CONC_PATH = "C:/Document/phd/SourceInverse/SourceInverse/data/jjj/concentration.xlsx"
-WIND_PATH = "C:/Document/phd/SourceInverse/SourceInverse/data/jjj/wind.xlsx"
+SITE_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/sites.xlsx'
+CONC_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/concentration.xlsx'
+WIND_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/wind.xlsx'
 # =========================
 # Model / Device
 # =========================
@@ -15,7 +15,7 @@ FIELD_MODE = "recurrent_pde"
 # Output
 # =========================
 OUTPUT_DIR = r"C:\Document\phd\SourceInverse\SourceInverse\result"
-TARGET_POLLUTANT = "乙苯"
+TARGET_POLLUTANT = '乙苯'
 MAKE_PLOTS = True
 
 # =========================
@@ -60,7 +60,10 @@ D_MIN_PHYS = 1.0  # m^2/s
 # =========================
 RECURRENT_GRID_NX = 36
 RECURRENT_GRID_NY = 36
-RECURRENT_SUBSTEPS = 1
+RECURRENT_SUBSTEPS = 1  # minimum when adaptive stepping is enabled
+RECURRENT_ADAPTIVE_SUBSTEPS = True
+RECURRENT_MAX_ADVECTION_CELLS = 6.0
+RECURRENT_MAX_SUBSTEPS = 3
 RECURRENT_SOURCE_SCALE = 1.0
 RECURRENT_DECAY = 0.50  # 1/hour
 RECURRENT_INITIAL_RELEASE_FRACTION = 1.0

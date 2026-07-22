@@ -1,10 +1,15 @@
+import math
+
 import torch
 import torch.nn.functional as F
 
 from config import (
+    RECURRENT_ADAPTIVE_SUBSTEPS,
     RECURRENT_GRID_NX,
     RECURRENT_GRID_NY,
     RECURRENT_INITIAL_RELEASE_FRACTION,
+    RECURRENT_MAX_ADVECTION_CELLS,
+    RECURRENT_MAX_SUBSTEPS,
     RECURRENT_SOURCE_SCALE,
     RECURRENT_SUBSTEPS,
 )
@@ -19,6 +24,52 @@ def _match_column(tensor):
     return tensor
 
 
+def _build_adaptive_substep_plan(
+    t_values,
+    u_values,
+    v_values,
+    dx,
+    dy,
+    minimum_substeps=1,
+    max_advection_cells=1.0,
+    maximum_substeps=16,
+    enabled=True,
+):
+    t_cpu = torch.as_tensor(t_values, dtype=torch.float64).detach().cpu().view(-1)
+    u_cpu = torch.as_tensor(u_values, dtype=torch.float64).detach().cpu().view(-1)
+    v_cpu = torch.as_tensor(v_values, dtype=torch.float64).detach().cpu().view(-1)
+    interval_count = max(int(t_cpu.numel()) - 1, 0)
+    if interval_count == 0:
+        return (), (), ()
+    if u_cpu.numel() < interval_count or v_cpu.numel() < interval_count:
+        raise ValueError("Wind history must cover every recurrent time interval.")
+
+    dx = max(abs(float(dx)), 1e-12)
+    dy = max(abs(float(dy)), 1e-12)
+    minimum_substeps = max(1, int(minimum_substeps))
+    maximum_substeps = max(minimum_substeps, int(maximum_substeps))
+    max_advection_cells = max(float(max_advection_cells), 1e-6)
+
+    selected = []
+    required = []
+    displacement_cells = []
+    for i in range(interval_count):
+        dt = max(float(t_cpu[i + 1] - t_cpu[i]), 0.0)
+        cell_distance = math.hypot(
+            float(u_cpu[i]) * dt / dx,
+            float(v_cpu[i]) * dt / dy,
+        )
+        requested = max(
+            minimum_substeps,
+            int(math.ceil(cell_distance / max_advection_cells - 1e-12)),
+        )
+        chosen = min(requested, maximum_substeps) if enabled else minimum_substeps
+        selected.append(chosen)
+        required.append(requested)
+        displacement_cells.append(cell_distance)
+    return tuple(selected), tuple(required), tuple(displacement_cells)
+
+
 def configure_recurrent_context(
     model,
     x_min,
@@ -31,6 +82,7 @@ def configure_recurrent_context(
     d_min_norm=0.0,
     d_scale_norm=1.0,
     decay_norm=0.0,
+    initial_release_dt=None,
     nx=None,
     ny=None,
 ):
@@ -62,6 +114,53 @@ def configure_recurrent_context(
     ).view(-1)
     model.recurrent_u = torch.as_tensor(u_values, dtype=dtype, device=device).view(-1)
     model.recurrent_v = torch.as_tensor(v_values, dtype=dtype, device=device).view(-1)
+    if initial_release_dt is None:
+        if model.recurrent_times.numel() > 1:
+            initial_release_dt = float(
+                model.recurrent_times[1] - model.recurrent_times[0]
+            )
+        else:
+            initial_release_dt = 1.0
+    model.recurrent_initial_release_dt = max(float(initial_release_dt), 1e-6)
+    (
+        model.recurrent_substeps_per_interval,
+        model.recurrent_required_substeps_per_interval,
+        model.recurrent_advection_cells_per_interval,
+    ) = _build_adaptive_substep_plan(
+        model.recurrent_times,
+        model.recurrent_u,
+        model.recurrent_v,
+        dx=float(model.recurrent_x_grid[1] - model.recurrent_x_grid[0]),
+        dy=float(model.recurrent_y_grid[1] - model.recurrent_y_grid[0]),
+        minimum_substeps=RECURRENT_SUBSTEPS,
+        max_advection_cells=RECURRENT_MAX_ADVECTION_CELLS,
+        maximum_substeps=RECURRENT_MAX_SUBSTEPS,
+        enabled=RECURRENT_ADAPTIVE_SUBSTEPS,
+    )
+    integration_times = [model.recurrent_times[0]]
+    interval_q_offsets = []
+    advection_plans = []
+    for i, substeps in enumerate(model.recurrent_substeps_per_interval):
+        t_i = model.recurrent_times[i]
+        dt_total = torch.clamp(model.recurrent_times[i + 1] - t_i, min=1e-6)
+        dt = dt_total / substeps
+        interval_q_offsets.append(len(integration_times) - 1)
+        integration_times.extend(
+            t_i + dt * step for step in range(1, substeps + 1)
+        )
+        x_back = model.recurrent_x_mesh_flat - model.recurrent_u[i] * dt
+        y_back = model.recurrent_y_mesh_flat - model.recurrent_v[i] * dt
+        advection_plans.append(
+            _build_bilinear_sample_plan(
+                x_back,
+                y_back,
+                model.recurrent_x_grid,
+                model.recurrent_y_grid,
+            )
+        )
+    model.recurrent_integration_times = torch.stack(integration_times)
+    model.recurrent_interval_q_offsets = tuple(interval_q_offsets)
+    model.recurrent_advection_plans = tuple(advection_plans)
 
 
 def _has_recurrent_context(model):
@@ -73,10 +172,11 @@ def _has_recurrent_context(model):
     )
 
 
-def _sample_grid_bilinear(field, x_query, y_query, x_grid, y_grid):
+def _build_bilinear_sample_plan(x_query, y_query, x_grid, y_grid):
     x_query = _match_column(x_query).view(-1)
     y_query = _match_column(y_query).view(-1)
-    ny, nx = field.shape
+    nx = int(x_grid.numel())
+    ny = int(y_grid.numel())
     x_min = x_grid[0]
     x_max = x_grid[-1]
     y_min = y_grid[0]
@@ -99,24 +199,53 @@ def _sample_grid_bilinear(field, x_query, y_query, x_grid, y_grid):
     wx = (gx - x0.to(gx.dtype)).view(-1, 1)
     wy = (gy - y0.to(gy.dtype)).view(-1, 1)
 
-    flat = field.reshape(-1)
-    f00 = flat[y0 * nx + x0].view(-1, 1)
-    f10 = flat[y0 * nx + x1].view(-1, 1)
-    f01 = flat[y1 * nx + x0].view(-1, 1)
-    f11 = flat[y1 * nx + x1].view(-1, 1)
-    sampled = (
-        (1.0 - wx) * (1.0 - wy) * f00
-        + wx * (1.0 - wy) * f10
-        + (1.0 - wx) * wy * f01
-        + wx * wy * f11
+    inside_weight = inside.to(gx.dtype).view(-1, 1)
+    return (
+        y0 * nx + x0,
+        y0 * nx + x1,
+        y1 * nx + x0,
+        y1 * nx + x1,
+        (1.0 - wx) * (1.0 - wy) * inside_weight,
+        wx * (1.0 - wy) * inside_weight,
+        (1.0 - wx) * wy * inside_weight,
+        wx * wy * inside_weight,
     )
-    return sampled * inside.to(sampled.dtype).view(-1, 1)
 
 
-def _advect_field(field, x_grid, y_grid, x_mesh_flat, y_mesh_flat, u, v, dt):
-    x_back = x_mesh_flat - u * dt
-    y_back = y_mesh_flat - v * dt
-    return _sample_grid_bilinear(field, x_back, y_back, x_grid, y_grid).view_as(field)
+def _sample_grid_bilinear_from_plan(field, plan):
+    idx00, idx10, idx01, idx11, w00, w10, w01, w11 = plan
+    flat = field.reshape(-1)
+    return (
+        w00 * flat[idx00].view(-1, 1)
+        + w10 * flat[idx10].view(-1, 1)
+        + w01 * flat[idx01].view(-1, 1)
+        + w11 * flat[idx11].view(-1, 1)
+    )
+
+
+def _sample_grid_bilinear(field, x_query, y_query, x_grid, y_grid):
+    plan = _build_bilinear_sample_plan(x_query, y_query, x_grid, y_grid)
+    return _sample_grid_bilinear_from_plan(field, plan)
+
+
+def _advect_field(
+    field,
+    x_grid,
+    y_grid,
+    x_mesh_flat,
+    y_mesh_flat,
+    u,
+    v,
+    dt,
+    sample_plan=None,
+):
+    if sample_plan is None:
+        x_back = x_mesh_flat - u * dt
+        y_back = y_mesh_flat - v * dt
+        sample_plan = _build_bilinear_sample_plan(
+            x_back, y_back, x_grid, y_grid
+        )
+    return _sample_grid_bilinear_from_plan(field, sample_plan).view_as(field)
 
 
 def _diffuse_field(field, x_grid, y_grid, diffusion, dt):
@@ -174,6 +303,7 @@ def _advance_recurrent_step(
     decay,
     source_scale,
     dt,
+    advection_plan=None,
 ):
     half_dt = 0.5 * dt
     field = field + source_scale * q_start * source_start * half_dt
@@ -186,6 +316,7 @@ def _advance_recurrent_step(
         u_value,
         v_value,
         dt,
+        sample_plan=advection_plan,
     )
     field = _diffuse_field(field, x_grid, y_grid, diffusion, dt)
     if decay > 0.0:
@@ -220,30 +351,39 @@ def recurrent_plume_fields(model, sigma_src):
         float(getattr(model, "recurrent_d_min_norm", 0.0))
         + model.D() * float(getattr(model, "recurrent_d_scale_norm", 1.0))
     )
-    substeps = max(1, int(RECURRENT_SUBSTEPS))
     decay = max(float(getattr(model, "recurrent_decay_norm", 0.0)), 0.0)
     source_scale = float(RECURRENT_SOURCE_SCALE)
 
+    source = _source_grid(
+        model, t_values[0], x_grid, y_grid, x_mesh, y_mesh, sigma_src
+    )
     if t_values.numel() == 1:
-        source = _source_grid(
-            model, t_values[0], x_grid, y_grid, x_mesh, y_mesh, sigma_src
-        )
         field = field + source_scale * model.Q(t_values[0].view(1, 1)).view(()) * source
         fields.append(field)
         return torch.stack(fields, dim=0)
 
+    integration_times = model.recurrent_integration_times.to(
+        device=model.xs.device, dtype=model.xs.dtype
+    )
+    q_integration = model.Q(integration_times.view(-1, 1)).view(-1)
+
     initial_release_fraction = max(float(RECURRENT_INITIAL_RELEASE_FRACTION), 0.0)
     if initial_release_fraction > 0.0:
-        first_dt_total = torch.clamp(t_values[1] - t_values[0], min=1e-6)
-        initial_source = _source_grid(
-            model, t_values[0], x_grid, y_grid, x_mesh, y_mesh, sigma_src
+        first_dt_total = torch.as_tensor(
+            getattr(
+                model,
+                "recurrent_initial_release_dt",
+                float(t_values[1] - t_values[0]),
+            ),
+            dtype=model.xs.dtype,
+            device=model.xs.device,
         )
-        initial_q = model.Q(t_values[0].view(1, 1)).view(())
+        initial_q = q_integration[0]
         field = (
             field
             + source_scale
             * initial_q
-            * initial_source
+            * source
             * first_dt_total
             * initial_release_fraction
         )
@@ -252,23 +392,23 @@ def recurrent_plume_fields(model, sigma_src):
     for i in range(t_values.numel() - 1):
         t_i = t_values[i]
         dt_total = torch.clamp(t_values[i + 1] - t_i, min=1e-6)
+        substep_plan = getattr(model, "recurrent_substeps_per_interval", ())
+        substeps = (
+            int(substep_plan[i])
+            if i < len(substep_plan)
+            else max(1, int(RECURRENT_SUBSTEPS))
+        )
         dt = dt_total / substeps
+        q_offset = model.recurrent_interval_q_offsets[i]
+        advection_plan = model.recurrent_advection_plans[i]
         for substep in range(substeps):
-            t_left = t_i + dt * substep
-            t_right = t_left + dt
-            source_left = _source_grid(
-                model, t_left, x_grid, y_grid, x_mesh, y_mesh, sigma_src
-            )
-            source_right = _source_grid(
-                model, t_right, x_grid, y_grid, x_mesh, y_mesh, sigma_src
-            )
-            q_left = model.Q(t_left.view(1, 1)).view(())
-            q_right = model.Q(t_right.view(1, 1)).view(())
+            q_left = q_integration[q_offset + substep]
+            q_right = q_integration[q_offset + substep + 1]
             field = _advance_recurrent_step(
                 field,
-                source_left,
+                source,
                 q_left,
-                source_right,
+                source,
                 q_right,
                 x_grid,
                 y_grid,
@@ -280,10 +420,69 @@ def recurrent_plume_fields(model, sigma_src):
                 decay,
                 source_scale,
                 dt,
+                advection_plan=advection_plan,
             )
         fields.append(field)
 
     return torch.stack(fields, dim=0)
+
+
+_RECURRENT_CONTEXT_ATTRIBUTES = (
+    "recurrent_d_min_norm",
+    "recurrent_d_scale_norm",
+    "recurrent_decay_norm",
+    "recurrent_x_grid",
+    "recurrent_y_grid",
+    "recurrent_x_mesh",
+    "recurrent_y_mesh",
+    "recurrent_x_mesh_flat",
+    "recurrent_y_mesh_flat",
+    "recurrent_times",
+    "recurrent_u",
+    "recurrent_v",
+    "recurrent_initial_release_dt",
+    "recurrent_substeps_per_interval",
+    "recurrent_required_substeps_per_interval",
+    "recurrent_advection_cells_per_interval",
+    "recurrent_integration_times",
+    "recurrent_interval_q_offsets",
+    "recurrent_advection_plans",
+)
+
+
+def recurrent_plume_fields_at_times(model, sigma_src, t_values, u_values, v_values):
+    if not _has_recurrent_context(model):
+        raise RuntimeError("Recurrent plume context has not been configured.")
+
+    saved_context = {
+        name: getattr(model, name)
+        for name in _RECURRENT_CONTEXT_ATTRIBUTES
+        if hasattr(model, name)
+    }
+    try:
+        configure_recurrent_context(
+            model=model,
+            x_min=float(saved_context["recurrent_x_grid"][0]),
+            x_max=float(saved_context["recurrent_x_grid"][-1]),
+            y_min=float(saved_context["recurrent_y_grid"][0]),
+            y_max=float(saved_context["recurrent_y_grid"][-1]),
+            t_values=t_values,
+            u_values=u_values,
+            v_values=v_values,
+            d_min_norm=saved_context["recurrent_d_min_norm"],
+            d_scale_norm=saved_context["recurrent_d_scale_norm"],
+            decay_norm=saved_context["recurrent_decay_norm"],
+            initial_release_dt=saved_context["recurrent_initial_release_dt"],
+            nx=int(saved_context["recurrent_x_grid"].numel()),
+            ny=int(saved_context["recurrent_y_grid"].numel()),
+        )
+        return recurrent_plume_fields(model, sigma_src)
+    finally:
+        for name in _RECURRENT_CONTEXT_ATTRIBUTES:
+            if name in saved_context:
+                setattr(model, name, saved_context[name])
+            elif hasattr(model, name):
+                delattr(model, name)
 
 
 def recurrent_plume_value(model, xyt, sigma_src):

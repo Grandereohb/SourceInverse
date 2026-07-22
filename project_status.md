@@ -2762,3 +2762,103 @@ Explained the time representation used by `pipeline.py`:
 - Evaluated `Q(t)` and source position at both substep endpoints so time-varying release remains aligned with the saved concentration state.
 - Added regression tests for the initial source-centered field and endpoint fresh-source mass.
 - Added `DIFFUSION_FPS` and reduced the default GIF playback speed from `5 fps` to `2 fps`.
+
+### 2026-07-19 Adaptive Recurrent Transport Substeps
+
+- Kept the recurrent concentration grid at `36 x 36` while making transport substeps adaptive per observation interval.
+- Defined interval displacement in grid-cell units as `sqrt((u*dt/dx)^2 + (v*dt/dy)^2)` and selected the smallest integer substep count that keeps each substep at or below the configured target.
+- Added `RECURRENT_ADAPTIVE_SUBSTEPS`, `RECURRENT_MAX_ADVECTION_CELLS`, and `RECURRENT_MAX_SUBSTEPS`; retained `RECURRENT_SUBSTEPS` as the minimum count.
+- Precomputed the complete substep plan once during recurrent-context setup to avoid repeated planning and GPU synchronization during training epochs.
+- Added log and JSON diagnostics for per-interval requested/selected counts, actual minimum/mean/maximum, maximum cell displacement after splitting, and safety-cap hits.
+- Added regression coverage for one-cell enforcement, the strong-wind safety cap, and recurrent-context plan integration.
+- On the current JJJ input, the strict one-cell target selected `2-14` substeps with a mean of `8.83`; this satisfies the spatial criterion but is expected to make training substantially slower than fixed one-step transport.
+
+### 2026-07-19 Adaptive Substep Performance Diagnosis
+
+- Confirmed that the current smoothed JJJ case selects `5-13` recurrent substeps per interval with a mean of `8.67` inside the full pipeline.
+- Each substep repeats source evaluation, semi-Lagrangian advection, Gaussian diffusion, and autograd graph construction, so forward and backward cost grows roughly in proportion to the selected count.
+- The strict one-cell criterion is therefore incompatible with the requested training speed on this hourly, high-wind, `36 x 36` case.
+- Recommended using a semi-Lagrangian-appropriate target of about `3` cells per substep with a moderate cap, then optionally applying strict stepping only during a short final refinement or result simulation.
+
+### 2026-07-19 Adaptive Substep Speed Adjustment
+
+- Relaxed `RECURRENT_MAX_ADVECTION_CELLS` from `1.0` to `4.0` because semi-Lagrangian advection remains stable when crossing multiple cells per step.
+- Reduced `RECURRENT_MAX_SUBSTEPS` from `16` to `4`, keeping the `36 x 36` grid and adaptive interval-by-interval selection.
+- For the current JJJ case, the expected plan decreases from an average of about `8.67` substeps to `2.58`, with a maximum of `4`.
+- Per user request, no tests or training validation were run after this parameter adjustment.
+
+### 2026-07-19 Recurrent Forward Performance Optimization
+
+- Relaxed adaptive stepping to `6` grid cells per substep with a maximum of `3` substeps; the current JJJ case is expected to average about `1.83` substeps.
+- Reused the single fixed-source spatial kernel throughout each recurrent forward pass instead of rebuilding it twice per substep.
+- Batched all substep endpoint evaluations of `Q(t)` into one model call per recurrent forward pass.
+- Precomputed semi-Lagrangian backtrace indices and bilinear weights once during recurrent-context setup and reused them across all epochs.
+- Added regression coverage confirming cached advection matches direct interpolation and that source/Q evaluations are reused.
+
+### 2026-07-20 Physically Recurring Diffusion GIF Frames
+
+- Kept a single `diffusion.gif` output and did not add a component animation.
+- Replaced concentration-field interpolation between observation times with one real recurrent solve on the GIF frame-time grid.
+- Interpolated normalized wind components and learned `Q(t)` inputs to render times, then applied source injection, advection, diffusion, and decay sequentially for every frame.
+- Preserved the training-time initial-release duration so a denser GIF time grid does not reduce the first-frame source mass.
+- Reused the recurrent model grid for physics and applied bilinear spatial upsampling only after all physical frame states were solved.
+- Corrected GIF baseline and wind interpolation to use normalized time consistently.
+### 2026-07-21 Post-Wind-Unit Optimization Report Deck
+
+- User requested a PowerPoint summary of all changes from the wind-unit correction through the current recurrent GIF implementation.
+- Created `outputs/风速单位修正后算法优化汇报.pptx` with 8 slides covering:
+  - the missing `3600 s/hour` conversion and corrected wind normalization;
+  - diffusion, boundary, decay, and source-initialization mechanism changes;
+  - source-time alignment and symmetric source integration;
+  - adaptive recurrent substeps and the `8.67 -> 2.58 -> 1.83` speed/accuracy trade-off;
+  - cached source kernels, batched `Q(t)`, and precomputed advection weights;
+  - real recurrent GIF frame generation instead of linear concentration-field blending;
+  - representative validation (`RMSE 86.22 -> 21.10`, `K1 peak ratio 0.531 -> 0.998`, trained-to-landscape distance `636 m -> 0 m`);
+  - remaining limitations: secondary peak misses, single fixed source, `36 x 36` spatial resolution, and pending standardized wall-clock benchmarks.
+- Rendered and visually inspected all 8 slides. The bundled `slides_test.py` could not run because the active environment lacks `pdf2image`, so artifact-tool PNG renders and layout exports were used for QA instead.
+
+### 2026-07-21 Compact Three-Slide Optimization Report
+
+- User requested reducing the 8-slide optimization report to 2-3 higher-density slides.
+- Created `outputs/风速单位修正后算法优化汇报_3页精简版.pptx` as a 3-slide version without a standalone cover:
+  - why the wind-unit mismatch weakened physical constraints and how the normalized transport scale was corrected;
+  - combined transport mechanism, source/time alignment, adaptive substeps, and recurrent-forward caching optimizations;
+  - representative validation metrics, confidence landscape, GIF recurrence explanation, and remaining limitations.
+- Reused the original deck's native slide layouts, typography, colors, spacing, and confidence-landscape image; no new visual primitives were added.
+- Rendered and visually inspected all three slides, passed template-fidelity and empty-placeholder checks, and found no overflow or warning markers in artifact-tool layout exports.
+- The bundled `slides_test.py` remained unavailable because `pdf2image` is not installed; this is an environment dependency issue rather than a deck validation failure.
+
+### 2026-07-22 Two-Slide Consolidated Optimization Report
+
+- User requested merging the first two report slides and reducing fragmented textboxes.
+- Created `outputs/风速单位修正后算法优化汇报_2页精简版.pptx` with two slides:
+  - a merged rationale-and-method slide combining the wind-unit problem, corrected normalization, transport/source changes, adaptive stepping, caching, and real recurrent GIF generation;
+  - the representative validation slide with metrics, confidence landscape, and consolidated interpretation.
+- On slide 1, all content inside the left panel is stored in one editable textbox and all content inside the right panel is stored in one editable textbox; obsolete header, formula, metric, and body component textboxes were deleted.
+- On slide 2, the interpretation, limitations, and conclusion are stored in one editable textbox; independent KPI blocks remain separate because they represent distinct metrics.
+- Visually inspected both slides, passed template-fidelity and empty-placeholder checks, and found no overflow or warning markers in artifact-tool layout exports.
+
+### 2026-07-22 Two-Slide Report Speaker Notes
+
+- Added Chinese speaker scripts to both slides of the consolidated report and saved `outputs/风速单位修正后算法优化汇报_2页精简版_含演讲稿.pptx`.
+- Slide 1 notes explain the missing `3600 s/hour` conversion, why Q and diffusion previously compensated for weak wind constraints, the normalized transport correction, source-time integration, real recurrent GIF generation, and recurrent-forward speed optimizations.
+- Slide 2 notes explain the RMSE, K1 peak-fit ratio, trained-versus-landscape agreement, confidence landscape, improved upwind source interpretation, and remaining single-source/secondary-peak limitations.
+- Re-imported the exported PPTX and verified that both speaker-note sections were preserved. Rendered both slides again and visually confirmed that adding notes did not alter the visible slide layout.
+
+### 2026-07-22 Client GeoTIFF Output Analysis
+
+- Reviewed `result/示例文件/融合示例/文件说明.txt` and all GeoTIFF examples without changing algorithm code.
+- Confirmed the fusion example is a single-hour total PM2.5 concentration raster, not a source-location raster: EPSG:4326, `3538 x 6153`, approximately `0.01 degree`, Float32, one band, units `ug/m3`, and NaN outside the valid China-domain mask.
+- The fusion example contains about 9.60 million valid pixels (44.1% of the full grid), with values from about `25.81` to `128.84 ug/m3`.
+- Confirmed the mesoscale example is a source-contribution product on a `263 x 282` LCC grid at 27 km resolution. `Total_PM25` is the sum of 31 source-category rasters; the maximum absolute pixelwise sum error is about `1.8e-6`.
+- In the provided mesoscale hour, category 30 (`regional transport - overseas`) contributes about 64.34% of the grid-summed total and category 29 (`regional transport - other China`) about 23.53%, so the example demonstrates source-category attribution rather than exact point-source inversion.
+- Identified an example inconsistency: mesoscale files declare NoData `-9999`, but the supplied rasters contain no `-9999` pixels and instead have small positive values across the full grid.
+- The current PINN diffusion field is the closest internal result to the requested concentration GeoTIFF. Because `ADD_BASELINE_TO_VIZ=True`, the GIF currently represents predicted plume concentration plus baseline; a source-only contribution raster would need the plume component without baseline.
+- Before implementation, the client must clarify whether the required TIF stores total predicted concentration or source-only contribution, whether one file is required per hour, the expected spatial extent/resolution, pollutant unit conversion, and whether source coordinates/Q/confidence are separate database fields.
+
+### 2026-07-22 Recurrent Transport Commit Summary
+
+- Reviewed the current worktree for commit preparation without creating a commit.
+- The main algorithm changes add adaptive recurrent transport substeps, cached bilinear advection plans, fixed-source reuse, batched Q evaluation, substep diagnostics, and dense-time physically recurrent GIF frames.
+- README/configuration and recurrent transport regression tests were updated with the new controls and behavior.
+- Three JJJ input workbooks are also modified; these should be excluded from the algorithm commit unless the input-data update is intentional.

@@ -87,6 +87,9 @@ from config import (
     RECURRENT_GRID_NX,
     RECURRENT_GRID_NY,
     RECURRENT_SUBSTEPS,
+    RECURRENT_ADAPTIVE_SUBSTEPS,
+    RECURRENT_MAX_ADVECTION_CELLS,
+    RECURRENT_MAX_SUBSTEPS,
     RECURRENT_SOURCE_SCALE,
     RECURRENT_DECAY,
     RECURRENT_INITIAL_RELEASE_FRACTION,
@@ -882,6 +885,15 @@ def run(
             d_scale_norm=normalize_diffusivity_m2s(1.0, T, L),
             decay_norm=normalize_decay_per_hour(RECURRENT_DECAY, T),
         )
+    recurrent_substep_counts = tuple(
+        getattr(model, "recurrent_substeps_per_interval", ())
+    )
+    recurrent_required_substeps = tuple(
+        getattr(model, "recurrent_required_substeps_per_interval", ())
+    )
+    recurrent_advection_cells = tuple(
+        getattr(model, "recurrent_advection_cells_per_interval", ())
+    )
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     if not trainable_params:
         raise ValueError("No trainable model parameters remain after mode configuration.")
@@ -909,12 +921,44 @@ def run(
         f"gif={DIFFUSION_N_FRAMES}x{DIFFUSION_NX}x{DIFFUSION_NY}@{DIFFUSION_FPS}fps"
     )
     if FIELD_MODE == "recurrent_pde":
+        selected_min = min(recurrent_substep_counts, default=RECURRENT_SUBSTEPS)
+        selected_max = max(recurrent_substep_counts, default=RECURRENT_SUBSTEPS)
+        selected_mean = (
+            float(np.mean(recurrent_substep_counts))
+            if recurrent_substep_counts
+            else float(RECURRENT_SUBSTEPS)
+        )
+        cap_hit_count = (
+            sum(
+                requested > selected
+                for requested, selected in zip(
+                    recurrent_required_substeps, recurrent_substep_counts
+                )
+            )
+            if RECURRENT_ADAPTIVE_SUBSTEPS
+            else 0
+        )
+        actual_cells = [
+            distance / selected
+            for distance, selected in zip(
+                recurrent_advection_cells, recurrent_substep_counts
+            )
+        ]
         print(
             "Recurrent transport settings: "
             f"wind_factor={WIND_SCALE:.3f}, D_min_m2s={D_MIN_PHYS:.3f}, "
             f"decay_per_hour={RECURRENT_DECAY:.3f}, "
-            f"substeps={RECURRENT_SUBSTEPS}"
+            f"adaptive_substeps={RECURRENT_ADAPTIVE_SUBSTEPS}, "
+            f"substeps[min/mean/max]={selected_min}/{selected_mean:.2f}/{selected_max}, "
+            f"max_cells_per_substep={max(actual_cells, default=0.0):.3f}, "
+            f"cap_hits={cap_hit_count}"
         )
+        if cap_hit_count > 0:
+            print(
+                "Warning: adaptive recurrent substeps reached the configured "
+                f"maximum in {cap_hit_count} interval(s); the one-cell target "
+                "is not guaranteed for those intervals."
+            )
 
     # Per-time wind vectors for time-sliced axis-loss on observation points
     t_w_t = torch.tensor(t_w, dtype=torch.float32, device=device).view(-1)
@@ -1582,6 +1626,28 @@ def run(
                 "grid_nx": int(RECURRENT_GRID_NX),
                 "grid_ny": int(RECURRENT_GRID_NY),
                 "substeps": int(RECURRENT_SUBSTEPS),
+                "substeps_mode": (
+                    "adaptive" if RECURRENT_ADAPTIVE_SUBSTEPS else "fixed"
+                ),
+                "minimum_substeps": int(RECURRENT_SUBSTEPS),
+                "maximum_substeps": int(RECURRENT_MAX_SUBSTEPS),
+                "max_advection_cells_target": float(
+                    RECURRENT_MAX_ADVECTION_CELLS
+                ),
+                "substeps_per_interval": list(recurrent_substep_counts),
+                "required_substeps_per_interval": list(
+                    recurrent_required_substeps
+                ),
+                "advection_cells_per_interval": list(
+                    recurrent_advection_cells
+                ),
+                "actual_substeps_min": int(selected_min),
+                "actual_substeps_mean": float(selected_mean),
+                "actual_substeps_max": int(selected_max),
+                "actual_max_advection_cells_per_substep": float(
+                    max(actual_cells, default=0.0)
+                ),
+                "substep_cap_hit_count": int(cap_hit_count),
                 "source_scale": float(RECURRENT_SOURCE_SCALE),
                 "decay": float(RECURRENT_DECAY),
                 "decay_units": "1/hour",
