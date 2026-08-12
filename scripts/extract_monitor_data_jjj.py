@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 import math
 import re
 from datetime import datetime
@@ -20,22 +19,21 @@ DEFAULT_SITES_NAME = "sites.xlsx"
 # =========================
 # Manual Inputs
 # =========================
-# MONITOR_DATA_DIR: directory containing one Excel file per station.
-# The script scans this directory recursively and reads the second sheet of each
-# .xls/.xlsx station workbook.
-MONITOR_DATA_DIR = 'data/jjj/2026年03-04-05月小时数据/5月小时数据'
+# INPUT_FILE_PATH: combined JJJ workbook with one station per sheet. Generate it
+# first with scripts/combine_jjj_hourly_monitor_workbooks.py.
+INPUT_FILE_PATH = 'data/jjj/2026年小时数据/567月小时数据_标准单位_汇总.xlsx'
 # START_TIME / END_TIME: inclusive extraction time range.
-START_TIME = '2026-05-15 01:00:00'
-END_TIME = '2026-05-15 13:00:00'
+START_TIME = '2026-05-03 19:00:00'
+END_TIME = '2026-05-04 07:00:00'
 # TARGET_POLLUTANT: pollutant to extract. It may be either the bare pollutant
 # name, such as "非甲烷总烃", or the full Excel column name, such as
 # "非甲烷总烃(μg/m³)".
-TARGET_POLLUTANT = '乙苯'
+TARGET_POLLUTANT = '氨'
 # WIND_STATION_NAME: use this station's wind direction/speed to build wind.xlsx.
 # Leave empty to keep the old behavior: average wind from all station files.
-WIND_STATION_NAME = 'H2站点（罐区区域点位）'
+WIND_STATION_NAME = 'H5站点（淮河道区域点位）'
 # SITES_FILE_PATH: workbook containing current station location information.
-SITES_FILE_PATH = r"data\jjj\2026年03-04-05月小时数据\当前数据点位信息.xlsx"
+SITES_FILE_PATH = r"data\jjj\2026年小时数据\当前数据点位信息.xlsx"
 
 # OUTPUT_FOLDER:
 # - empty string: save directly into data/jjj/
@@ -48,10 +46,9 @@ OUTPUT_FOLDER = ''
 # - "error": stop and tell you which output file is locked.
 LOCKED_OUTPUT_POLICY = "timestamp_folder"
 
-EXCEL_SUFFIXES = {".xls", ".xlsx", ".xlsm"}
 TIME_COLUMN = "时间"
-WIND_DIR_COLUMN = "风向(°)"
-WIND_SPEED_COLUMN = "风速(m/s)"
+WIND_DIR_COLUMN = "风向"
+WIND_SPEED_COLUMN = "风速"
 
 
 def resolve_path(path: str | Path, base_dir: Path = REPO_ROOT) -> Path:
@@ -106,11 +103,8 @@ def find_column(columns: list[str], target: str) -> str | None:
     return None
 
 
-def station_name_from_file(path: Path) -> str:
-    stem = path.stem
-    if "_站点监测数据" in stem:
-        return stem.split("_站点监测数据", 1)[0]
-    return stem
+def clean_station_name(sheet_name: str) -> str:
+    return re.sub(r"[（(]带标识[）)]$", "", str(sheet_name).strip()).strip()
 
 
 def station_name_matches(station_name: str, target_station_name: str | None) -> bool:
@@ -119,33 +113,24 @@ def station_name_matches(station_name: str, target_station_name: str | None) -> 
     return str(station_name).strip() == str(target_station_name).strip()
 
 
-def find_table_header_row(raw_df: pd.DataFrame) -> int:
-    for idx, row in raw_df.iterrows():
-        values = [str(v).strip() for v in row.tolist() if pd.notna(v)]
-        if TIME_COLUMN in values:
-            return int(idx)
-    raise ValueError("Could not find the hourly data header row containing '时间'.")
-
-
-def load_station_hourly_table(path: Path) -> pd.DataFrame:
-    workbook = pd.ExcelFile(path)
-    if len(workbook.sheet_names) < 2:
-        raise ValueError("Station workbook does not contain a second sheet.")
-
-    raw = pd.read_excel(path, sheet_name=workbook.sheet_names[1], header=None)
-    header_row = find_table_header_row(raw)
-    header = raw.iloc[header_row].tolist()
-
-    table = raw.iloc[header_row + 1 :].copy()
-    table.columns = header
-    table = table.loc[:, [pd.notna(c) and str(c).strip() != "" for c in table.columns]]
-    table.columns = [str(c).strip() for c in table.columns]
+def load_station_hourly_table(
+    workbook: pd.ExcelFile, sheet_name: str
+) -> pd.DataFrame:
+    table = pd.read_excel(workbook, sheet_name=sheet_name)
+    table = table.loc[
+        :, [pd.notna(column) and bool(str(column).strip()) for column in table.columns]
+    ]
+    table.columns = [str(column).strip() for column in table.columns]
     table = table.dropna(how="all")
 
     if TIME_COLUMN not in table.columns:
-        raise ValueError("Parsed hourly table does not contain '时间'.")
+        raise ValueError(
+            f"Parsed station sheet does not contain '{TIME_COLUMN}': {sheet_name}"
+        )
 
-    table[TIME_COLUMN] = pd.to_datetime(table[TIME_COLUMN], errors="coerce")
+    table[TIME_COLUMN] = pd.to_datetime(
+        table[TIME_COLUMN], errors="coerce", format="mixed"
+    )
     table = table.dropna(subset=[TIME_COLUMN])
     return table
 
@@ -161,48 +146,6 @@ def filter_time_range(
     if end_time is not None and str(end_time).strip():
         out = out[out[TIME_COLUMN] <= pd.to_datetime(end_time)]
     return out.sort_values(TIME_COLUMN).reset_index(drop=True)
-
-
-def list_station_workbooks(data_dir: str | Path) -> list[Path]:
-    root = resolve_path(data_dir)
-    if not root.exists():
-        raise FileNotFoundError(f"Monitor data directory not found: {root}")
-    if not root.is_dir():
-        raise NotADirectoryError(f"Monitor data path is not a directory: {root}")
-
-    files = []
-    for path in root.rglob("*"):
-        if path.is_file() and path.suffix.lower() in EXCEL_SUFFIXES:
-            if path.name.startswith("~$"):
-                continue
-            if "当前数据点位信息" in path.name:
-                continue
-            files.append(path)
-
-    if not files:
-        raise FileNotFoundError(f"No station Excel files found under: {root}")
-    return sorted(files)
-
-
-def check_excel_dependencies(files: list[Path], sites_path: str | Path) -> None:
-    suffixes = {path.suffix.lower() for path in files}
-    suffixes.add(resolve_path(sites_path).suffix.lower())
-
-    missing: list[str] = []
-    if ".xls" in suffixes and importlib.util.find_spec("xlrd") is None:
-        missing.append("xlrd>=2.0.1")
-    if (
-        suffixes.intersection({".xlsx", ".xlsm"})
-        and importlib.util.find_spec("openpyxl") is None
-    ):
-        missing.append("openpyxl")
-
-    if missing:
-        install_cmd = f"python -m pip install {' '.join(missing)}"
-        raise ImportError(
-            "Missing Excel dependency for the input files: "
-            f"{', '.join(missing)}. Install it in the active environment with: {install_cmd}"
-        )
 
 
 def circular_mean_deg(series: pd.Series) -> float | None:
@@ -224,7 +167,7 @@ def circular_mean_deg(series: pd.Series) -> float | None:
 
 
 def build_concentration_and_wind_tables(
-    data_dir: str | Path,
+    input_path: str | Path,
     start_time: str | pd.Timestamp | None,
     end_time: str | pd.Timestamp | None,
     pollutant: str,
@@ -235,9 +178,20 @@ def build_concentration_and_wind_tables(
     missing_pollutant: list[str] = []
     station_names: list[str] = []
 
-    for path in list_station_workbooks(data_dir):
-        station_name = station_name_from_file(path)
-        table = filter_time_range(load_station_hourly_table(path), start_time, end_time)
+    path = resolve_path(input_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Monitor workbook not found: {path}")
+    if not path.is_file():
+        raise IsADirectoryError(f"Monitor input must be an Excel workbook: {path}")
+
+    workbook = pd.ExcelFile(path)
+    for sheet_name in workbook.sheet_names:
+        station_name = clean_station_name(sheet_name)
+        table = filter_time_range(
+            load_station_hourly_table(workbook, sheet_name),
+            start_time,
+            end_time,
+        )
         if table.empty:
             continue
 
@@ -264,7 +218,7 @@ def build_concentration_and_wind_tables(
 
     if not concentration_by_station:
         detail = (
-            f"pollutant '{pollutant}' not found in any station workbook"
+            f"pollutant '{pollutant}' not found in any station sheet"
             if missing_pollutant
             else "no rows matched the requested time range"
         )
@@ -406,7 +360,7 @@ def prepare_output_paths(out_dir: Path) -> tuple[Path, Path, Path]:
 
 
 def extract_hourly_monitor_data(
-    data_dir: str | Path,
+    input_path: str | Path,
     start_time: str | pd.Timestamp | None,
     end_time: str | pd.Timestamp | None,
     pollutant: str,
@@ -415,10 +369,9 @@ def extract_hourly_monitor_data(
     output_folder: str | None = None,
 ) -> tuple[Path, Path, Path]:
     out_dir = resolve_output_dir(output_folder)
-    check_excel_dependencies(list_station_workbooks(data_dir), sites_path)
 
     concentration_df, wind_df, station_names = build_concentration_and_wind_tables(
-        data_dir=data_dir,
+        input_path=input_path,
         start_time=start_time,
         end_time=end_time,
         pollutant=pollutant,
@@ -437,7 +390,7 @@ def extract_hourly_monitor_data(
 
 def main() -> None:
     concentration_path, wind_path, sites_path = extract_hourly_monitor_data(
-        data_dir=MONITOR_DATA_DIR,
+        input_path=INPUT_FILE_PATH,
         start_time=START_TIME,
         end_time=END_TIME,
         pollutant=TARGET_POLLUTANT,
@@ -446,7 +399,7 @@ def main() -> None:
         output_folder=OUTPUT_FOLDER,
     )
 
-    print(f"Monitor data directory: {MONITOR_DATA_DIR}")
+    print(f"Monitor workbook: {INPUT_FILE_PATH}")
     print(f"Time range: {START_TIME} -> {END_TIME}")
     print(f"Pollutant: {TARGET_POLLUTANT}")
     print(f"Wind station: {WIND_STATION_NAME or 'all stations mean'}")

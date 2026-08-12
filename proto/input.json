@@ -1,0 +1,28 @@
+{
+    "request_id": "client-20260811-001",
+    "pollutant": "乙烯",
+    "concentration_unit": "ug/m3",
+    "coordinate_system": "WGS84",
+    "stations": [
+        {
+            "station_id": "S01",
+            "longitude": 121.30,
+            "latitude": 30.71
+        }
+    ],
+    "wind": [
+        {
+            "time": "2026-08-11 00:00:00",
+            "sp": 2.6,
+            "dir": 45.0
+        }
+    ],
+    "concentrations": [
+        {
+            "time": "2026-08-11 00:00:00",
+            "station_id": "S01",
+            "value": 125.6
+        }
+    ],
+    "callback_url": "https://client.example.com/source-inversion/result"
+}

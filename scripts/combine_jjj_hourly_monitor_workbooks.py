@@ -11,14 +11,9 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 DATA_DIR = REPO_ROOT / "data"
 
-DEFAULT_INPUT_DIR = (
-    DATA_DIR / "jjj" / "2026年03-04-05月小时数据" / "5月小时数据"
-)
+DEFAULT_INPUT_DIR = DATA_DIR / "jjj" / "2026年小时数据" / "7月小时数据"
 DEFAULT_OUTPUT_PATH = (
-    DATA_DIR
-    / "jjj"
-    / "2026年03-04-05月小时数据"
-    / "5月小时数据_标准单位_汇总.xlsx"
+    DATA_DIR / "jjj" / "2026年小时数据" / "7月小时数据_标准单位_汇总.xlsx"
 )
 
 TIME_COLUMN = "时间"
@@ -56,7 +51,7 @@ def safe_sheet_name(name: str, used: set[str]) -> str:
     counter = 1
     while out in used:
         suffix = f"_{counter}"
-        out = f"{base[:31 - len(suffix)]}{suffix}"
+        out = f"{base[: 31 - len(suffix)]}{suffix}"
         counter += 1
     used.add(out)
     return out
@@ -115,7 +110,9 @@ def load_station_sheet(path: Path, sheet_index: int = SHEET_INDEX) -> pd.DataFra
             f"Workbook does not contain sheet index {sheet_index + 1}: {path}"
         )
 
-    raw_df = pd.read_excel(workbook, sheet_name=workbook.sheet_names[sheet_index], header=None)
+    raw_df = pd.read_excel(
+        workbook, sheet_name=workbook.sheet_names[sheet_index], header=None
+    )
     header_row = find_header_row(raw_df, path)
     raw_columns = [clean_text(value) for value in raw_df.iloc[header_row].tolist()]
 
@@ -127,8 +124,14 @@ def load_station_sheet(path: Path, sheet_index: int = SHEET_INDEX) -> pd.DataFra
     if TIME_COLUMN not in table.columns:
         raise ValueError(f"Parsed table does not contain '{TIME_COLUMN}': {path}")
 
-    table[TIME_COLUMN] = pd.to_datetime(table[TIME_COLUMN], errors="coerce", format="mixed")
-    table = table.dropna(subset=[TIME_COLUMN]).sort_values(TIME_COLUMN).reset_index(drop=True)
+    table[TIME_COLUMN] = pd.to_datetime(
+        table[TIME_COLUMN], errors="coerce", format="mixed"
+    )
+    table = (
+        table.dropna(subset=[TIME_COLUMN])
+        .sort_values(TIME_COLUMN)
+        .reset_index(drop=True)
+    )
 
     clean_columns: list[str] = []
     units: list[str] = []

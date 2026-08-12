@@ -26,6 +26,36 @@ Key settings:
   `RECURRENT_MAX_ADVECTION_CELLS`, `RECURRENT_MAX_SUBSTEPS`, and
   `RECURRENT_INITIAL_RELEASE_FRACTION`
 
+## Inversion Text Outputs
+
+Every recurrent-PDE run exports database-friendly TXT files twice: under the
+case result directory and under `<OUTPUT_DIR>/溯源输出/<case-name>/`.
+
+- `污染源点坐标.txt`: one tab-separated `longitude, latitude` row.
+- `浓度场/浓度场_YYYYMMDD_hHH.txt`: one row per recurrent grid cell with
+  tab-separated `longitude, latitude, predicted_total_concentration` values.
+
+Hourly fields are evaluated by the recurrent transport model at each whole
+clock hour in the event window. Concentration is plume contribution plus the
+time-interpolated baseline, matching the quantity displayed in `diffusion.gif`.
+
+## Consolidated Diagnostics
+
+Each case writes one `diagnostics.xlsx` workbook instead of separate diagnostic
+CSV files. Depending on the enabled model features, it contains these sheets:
+
+- `q_time_series`
+- `q_segments`
+- `training`
+- `station_peaks`
+- `source_landscape`
+
+The complete source-landscape metadata is embedded under `source_landscape` in
+`result_quality_report.json`. When landscape confidence is enabled, the single
+`source_confidence.png` combines stations, the trained source, the landscape
+best point, relative-probability regions, confidence contours, and loss
+contours.
+
 ## Module Layout
 
 - `config.py` - Paths and hyperparameters
@@ -44,8 +74,9 @@ Key settings:
 - The default `FIELD_MODE = "recurrent_pde"` recursively advances a gridded plume
   field through the observed wind sequence before sampling concentrations at
   station locations.
-- Output includes copied input Excel files, source location, diagnostics,
-  station time-series plots, confidence plots, and `diffusion.gif`.
+- Output includes copied input Excel files, source location, consolidated
+  diagnostics, station time-series plots, one source-confidence plot, and
+  `diffusion.gif`.
 
 ## Model Selection
 

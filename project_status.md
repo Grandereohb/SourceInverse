@@ -1693,7 +1693,9 @@ loss_data = torch.mean(data_weight_t * (data_residual**2))
 - To:
 
 ```python
-residual_focal_weight = 1 + RESIDUAL_FOCAL_WEIGHT * abs(residual / scale) ** RESIDUAL_FOCAL_POWER
+residual_focal_weight = (
+    1 + RESIDUAL_FOCAL_WEIGHT * abs(residual / scale) ** RESIDUAL_FOCAL_POWER
+)
 loss_data = mean(data_weight_t * residual_focal_weight * residual**2)
 ```
 
@@ -1874,7 +1876,10 @@ raw_abs_residual = abs(c_pred - c_obs_t) * c_scale
 weighted_raw_abs_residual = sqrt(data_weight_t) * raw_abs_residual
 raw_residual_base_loss = mean(weighted_raw_abs_residual)
 raw_residual_worst_loss = max(raw_abs_residual)
-loss_data = RAW_RESIDUAL_BASE_WEIGHT * raw_residual_base_loss + RAW_RESIDUAL_WORST_WEIGHT * raw_residual_worst_loss
+loss_data = (
+    RAW_RESIDUAL_BASE_WEIGHT * raw_residual_base_loss
+    + RAW_RESIDUAL_WORST_WEIGHT * raw_residual_worst_loss
+)
 ```
 
 - If `RESIDUAL_FOCAL_WEIGHT > 0`, it now optionally modifies the weighted raw MAE base term, but focal is disabled by default.
@@ -2243,7 +2248,7 @@ Validation:
 
 User requested a script equivalent to `scripts/extract_abnormal_high_monitor_data.py` for the JJJ May hourly station workbooks under:
 
-- `data/jjj/2026年03-04-05月小时数据/5月小时数据/`
+- `data/jjj/2026年小时数据/5月小时数据/`
 
 Difference from SHSH-JS data:
 
@@ -2329,11 +2334,11 @@ Added:
 
 Generated:
 
-- `data/jjj/2026年03-04-05月小时数据/5月小时数据_标准单位_汇总.xlsx`
+- `data/jjj/2026年小时数据/5月小时数据_标准单位_汇总.xlsx`
 
 Implementation:
 
-- Scans one station workbook per file under `data/jjj/2026年03-04-05月小时数据/5月小时数据/`.
+- Scans one station workbook per file under `data/jjj/2026年小时数据/5月小时数据/`.
 - Reads sheet2 by default.
 - Automatically finds the data header row containing `时间`.
 - Writes one sheet per station, named like `H1站点（装备制造区域点位）(带标识)`.
@@ -2391,7 +2396,7 @@ Cause:
 Changed in `scripts/run_recent_leak_source_inversions.py`:
 
 - Added `MONITOR_INPUT_PATH` for the raw monitor data source:
-  - `data/jjj/2026年03-04-05月小时数据/5月小时数据`
+  - `data/jjj/2026年小时数据/5月小时数据`
 - Split script selection from extractor output location:
   - `EXTRACT_SCRIPT_KEY = "jjj"`
   - `EXTRACT_OUTPUT_FOLDER = ""`
@@ -2862,3 +2867,111 @@ Explained the time representation used by `pipeline.py`:
 - The main algorithm changes add adaptive recurrent transport substeps, cached bilinear advection plans, fixed-source reuse, batched Q evaluation, substep diagnostics, and dense-time physically recurrent GIF frames.
 - README/configuration and recurrent transport regression tests were updated with the new controls and behavior.
 - Three JJJ input workbooks are also modified; these should be excluded from the algorithm commit unless the input-data update is intentional.
+
+### 2026-07-22 Gaussian Diffusion Change Explanation
+
+- Revisited commit `3879a66` and explained the replacement of explicit Euler/Laplacian diffusion with differentiable Gaussian convolution.
+- The previous explicit update silently capped normalized diffusivity at `0.22 * min(dx^2, dy^2) / dt`; with a coarse `36 x 36` grid and long observation intervals, physically meaningful diffusivities could therefore be replaced by much smaller numerical values and receive zero gradient above the cap.
+- The current implementation converts physical diffusivity from `m^2/s` to normalized model units using `D_norm = D_phys * 3600 * T_hours / L_m^2`.
+- Each diffusion step uses the analytical Gaussian width `sigma = sqrt(2 * D_norm * dt)` and separable convolutions, which are stable for positive D without an explicit stability clamp.
+- This makes learned/configured diffusivity control actual plume broadening, reduces compensation through Q or source position, avoids explicit-scheme oscillation/negative concentrations, and keeps the operation GPU-friendly and differentiable.
+- Remaining limitations are spatial resolution, finite kernel truncation, and zero-padding/open-boundary mass loss; unconditional numerical stability does not remove those accuracy limits.
+
+### 2026-07-23 Hourly Concentration Field Reconstruction Assessment
+
+- Checked existing run directories and confirmed they do not persist a model checkpoint (`.pt`, `.pth`, or equivalent) or raw hourly concentration-field arrays.
+- Existing outputs preserve training inputs, hourly Q values, source coordinates, diagnostics, plots, and the rendered `diffusion.gif`, but the GIF is color-mapped and quantized rather than a recoverable numeric field.
+- Therefore, existing results alone cannot guarantee exact reconstruction of every hourly numeric concentration field. An approximate replay may be possible from Q/source/wind/log metadata, but learned model state and run-version details are not fully persisted.
+- Future runs can reconstruct/export exact hourly fields by saving the restored best `state_dict` and recurrent context, or more directly by exporting the hourly field tensors/GeoTIFFs when they are generated.
+
+### 2026-07-23 Hourly Text Concentration Outputs
+
+- Added `pinn_source/source_output.py` to export each whole-hour recurrent concentration field directly from the restored best model, rather than recovering values from `diffusion.gif`.
+- Each field TXT is tab-separated without a header and contains `longitude`, `latitude`, and predicted total concentration; total concentration is recurrent plume contribution scaled to observation units plus the time-interpolated baseline.
+- Added a one-row tab-separated `污染源点坐标.txt` with `longitude` and `latitude`.
+- Each run writes identical outputs to both `<case-result>/溯源输出/` and `result/溯源输出/<case-name>/`; hourly fields are stored under each destination's `浓度场/` subdirectory as `浓度场_YYYYMMDD_hHH.txt`.
+- Wired export into `pipeline.py` immediately after best-model restoration and Q time-series export, independent of plot/GIF generation, and recorded export metadata in `result_quality_report.json`.
+- Added regression coverage for the two output destinations, source coordinate layout, hourly file naming, grid row count, and baseline-inclusive concentration values. `python -m unittest tests.test_recurrent_transport` passes all 11 tests.
+
+### 2026-07-27 Manual Pollutant List for Batch Inversion
+
+- Added `MANUAL_INPUT: list[str] = []` to `scripts/run_recent_leak_source_inversions.py`.
+- When the list is empty, batch selection remains unchanged. When populated, only events whose pollutant name exactly matches an entry are selected for inversion.
+- The exact-name list is applied together with the existing optional `POLLUTANT_CONTAINS` filter, and the selected manual list is recorded in the batch summary workbook.
+
+### 2026-07-28 JJJ Abnormal Pollutant Lists
+
+- Added local `DEFAULT_SKIP_POLLUTANTS` and `MANUAL_INPUT` lists to `scripts/extract_abnormal_high_jjj_monitor_data.py`.
+- The skip list excludes matching pollutants from both overall-threshold calculation and abnormal-record output.
+- A non-empty `MANUAL_INPUT` list keeps only matching pollutants; the skip list takes precedence when the same pollutant appears in both lists.
+
+### 2026-07-29 JJJ Abnormal Extractor Default Input Fix
+
+- Fixed `scripts/extract_abnormal_high_jjj_monitor_data.py` default input from a non-existent aggregate path to the existing `data/jjj/2026年小时数据/7月小时数据` station-workbook directory.
+- Renamed the matching default output to `abnormal_high_monitor_data_jjj_july.xlsx`.
+- The aggregate `567月小时数据_标准单位_汇总.xlsx` is a single multi-sheet workbook, whereas this extractor reads one station workbook per file from a directory.
+
+### 2026-07-29 JJJ Hourly Workbook Combination Usage
+
+- Confirmed `scripts/combine_jjj_hourly_monitor_workbooks.py` combines one station workbook per input file into a single multi-sheet workbook with cleaned column names and a unit row, matching the general SHSH-JS layout.
+- Repository search found no current downstream script that reads `5月小时数据_标准单位_汇总.xlsx`, `6月小时数据_标准单位_汇总.xlsx`, `7月小时数据_标准单位_汇总.xlsx`, or `567月小时数据_标准单位_汇总.xlsx`.
+- Current JJJ abnormal-event extraction and source-inversion input extraction both still read the raw per-station workbook directory directly.
+
+### 2026-07-29 JJJ Aggregate Workbook Abnormal Extraction
+
+- Refactored `scripts/extract_abnormal_high_jjj_monitor_data.py` to read `data/jjj/2026年小时数据/567月小时数据_标准单位_汇总.xlsx` directly instead of scanning one source workbook per station.
+- The extractor now treats each workbook sheet as one station, removes the unit row through time parsing, and retains the existing skip-list and manual-retain-list behavior.
+- Removed directory scanning, raw-file station-name parsing, header-row discovery, and sheet-index CLI handling that were only needed for the old per-file layout.
+- Validated 15 stations, 926,153 numeric monitor records, 140 retained pollutants, and a time span from 2026-05-01 00:00:00 to 2026-07-28 14:00:00.
+- Added a file-header note that `combine_jjj_hourly_monitor_workbooks.py` must generate the multi-station workbook before this extractor is run.
+
+### 2026-07-29 JJJ Batch Inversion Aggregate Monitor Input
+
+- Changed `scripts/run_recent_leak_source_inversions.py` JJJ `MONITOR_INPUT_PATH` to `data/jjj/2026年小时数据/567月小时数据_标准单位_汇总.xlsx`.
+- Refactored `scripts/extract_monitor_data_jjj.py` to read that multi-sheet workbook through `INPUT_FILE_PATH`, with each sheet treated as one station.
+- Removed per-file directory scanning, second-sheet/header parsing, `.xls` dependency handling, and the old `MONITOR_DATA_DIR` configuration from the JJJ input extractor.
+- Updated wind-column matching to the normalized `风速` and `风向` fields in the combined workbook; unit rows are discarded through mixed-format time parsing.
+- Validated a 13-hour real window: 11 stations for the configured pollutant, `concentration.xlsx` shape `(13, 13)`, `wind.xlsx` shape `(13, 3)`, and `sites.xlsx` shape `(2, 12)` with matching station-column order.
+
+### 2026-08-02 Result Output Simplification Assessment
+
+- Audited the latest 27-case SHSH batch: 1,063 files and 86.79 MB total; GIF files use 41.17 MB, TXT fields 26.01 MB, and PNG plots 17.99 MB.
+- Confirmed `source_loss_landscape.csv` and `source_probability_map.csv` are byte-identical and should become one `source_landscape` table.
+- Confirmed hourly concentration TXT files and source-coordinate TXT files are duplicated between each case's `溯源输出` folder and the batch-level `溯源输出/<case>` folder; at least 9.15 MB is physically duplicated in this batch.
+- Confirmed `source_confidence_landscape.png` and `sites_source_confidence.png` visualize nearly the same stations, trained source, landscape best, probability surface, and confidence contours, so they can be replaced by one combined source-confidence map.
+- Recommended keeping the three copied training-input workbooks for reproducibility, keeping structured training and station-peak diagnostics, and preserving hourly TXT format while it remains a client requirement.
+- Proposed merging diagnostic CSV files into one multi-sheet `diagnostics.xlsx`, merging full confidence metadata into `result_quality_report.json`, and optionally replacing GIF with MP4 for the largest additional size reduction.
+
+### 2026-08-02 Result Output Consolidation
+
+- User selected simplification items 2, 3, 4, and 5 and requested running `scripts/run_recent_leak_source_inversions.py` after implementation.
+- Replaced the duplicate `source_loss_landscape.csv` and `source_probability_map.csv` outputs with one `source_landscape` sheet in `diagnostics.xlsx`.
+- Consolidated Q time series, Q segments, training diagnostics, station peak diagnostics, and source landscape records into the multi-sheet `diagnostics.xlsx` workbook.
+- Merged the complete source-landscape metadata into `result_quality_report.json` instead of writing a separate `source_confidence_landscape.json`.
+- Replaced the two overlapping source-confidence figures with one `source_confidence.png` containing the probability surface, confidence regions, loss contours, stations, trained source, and landscape-best source.
+- Kept the existing duplicate client-facing hourly TXT exports unchanged because output simplification item 1 was not selected.
+
+### 2026-08-11 Incremental Linux Deployment Architecture Discussion
+
+- User requested an engineering deployment plan that preserves the current local algorithm framework and adds deployment capabilities incrementally.
+- Target environment is an x86 Linux server without a GPU. The requested delivery form is a CPU-only Docker image with HTTP request, file-transfer, and result-callback support.
+- Recommended adding a separate `deployment/` layer containing a FastAPI service, input adapters, a queued CPU worker, output packaging, callback delivery, Docker files, and deployment tests. The existing `pinn_source/` algorithm remains the source of truth.
+- Each request should become an isolated asynchronous job. JSON or TXT input is validated and converted into the existing `sites.xlsx`, `concentration.xlsx`, and `wind.xlsx` formats, then a subprocess calls `pipeline.run(...)` directly rather than using the abnormal-event batch script.
+- Recommended returning a job ID immediately, exposing status and result-download endpoints, and sending one ZIP package plus a JSON manifest to the client's callback URL with checksums, authentication, retry, and idempotency controls.
+- Existing outputs should be retained and supplemented with a machine-readable release-strength time series derived from the trained `Q(t)` diagnostics.
+- Important unit caveat: current `Q(t)` is a model-scale two-dimensional source injection strength. It can be reported as model-relative release strength immediately, but conversion to physical mass flow such as `kg/h` requires an agreed concentration unit, vertical/mixing-volume assumption, source normalization, and calibration or validation data.
+- CPU deployment should use a pinned Python 3.11 x86_64 environment and CPU-only PyTorch, force `PINN_DEVICE=cpu`, control OpenMP/MKL threads, and start with one concurrent inversion worker to avoid CPU oversubscription.
+- User clarified the deployment input contract: all `time` values must use the same `YYYY-MM-DD HH:MM:SS` representation as the current Excel inputs, for example `2026-08-11 00:00:00`.
+- Wind records must use `sp` for wind speed and `dir` for wind direction. Their units and convention remain `m/s` and meteorological wind-from degrees unless the client contract explicitly states otherwise.
+
+### 2026-08-12 Concentration Field JSON Transport Assessment
+
+- Audited 45 existing cases under `result/溯源输出`; every hourly concentration field uses the current `36 x 36` recurrent grid, so each time point contains 1,296 concentration values.
+- Existing cases contain 1 to 21 hourly fields, averaging 12.73 fields per case. Their TXT concentration-field payloads average about 616 KB per case and reach about 1.03 MB at 21 hours.
+- A representative 13-hour case contains 16,848 concentration values. Repeating `[longitude, latitude, concentration]` rows in compact JSON costs about 643 KB, while an optimized JSON structure that sends the 1,296-point longitude/latitude grid once and then one concentration array per hour costs about 224 KB uncompressed or about 52 KB with gzip.
+- Direct JSON field transport is therefore practical at the current grid and event lengths. Recommended schema: one shared `grid` object containing `nx`, `ny`, `longitude[]`, and `latitude[]`, plus `fields[]` entries containing `time` in `YYYY-MM-DD HH:MM:SS` format and `concentration[]`.
+- Avoid one JSON object per grid point because repeating field names roughly doubles the uncompressed payload. Enable HTTP gzip and set request/response limits with margin, such as at least 10 MB per job for current settings.
+- User clarified that the client cannot parse a shared-grid representation and requires every concentration value to carry its own longitude and latitude.
+- Re-evaluated the 45 existing cases using `fields[].points[]` objects with `longitude`, `latitude`, and `concentration`. A representative 13-hour case is about 1.30 MB uncompressed and 119 KB with gzip; the largest current 21-hour case is about 2.11 MB uncompressed and 188 KB with gzip.
+- This explicit point-object JSON remains practical over HTTP. Recommend prioritizing parseability, enabling gzip, enforcing exactly 1,296 points per hourly field for the current 36 x 36 grid, and retaining a 10 MB response-size allowance for future grid growth.
+- Confirmed that the integration can use HTTP POST in both directions: the client submits an inversion job with `POST /api/v1/jobs`, and the deployment service sends the completed result JSON to the client's callback URL with another POST request.

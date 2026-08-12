@@ -216,11 +216,12 @@ def plot_sites_and_source(
     save_path=None,
     show=True,
 ):
-    fig, ax = plt.subplots(figsize=(6, 6))
+    fig, ax = plt.subplots(figsize=(8, 7) if confidence_map is not None else (6, 6))
     if confidence_map is not None:
         lon_grid = np.asarray(confidence_map.get("lon_grid"), dtype=float)
         lat_grid = np.asarray(confidence_map.get("lat_grid"), dtype=float)
         prob_grid = np.asarray(confidence_map.get("prob_grid"), dtype=float)
+        loss_grid = np.asarray(confidence_map.get("loss_grid"), dtype=float)
         if lon_grid.size and lat_grid.size and prob_grid.size:
             fine_lon, fine_lat, smooth_prob = _smooth_probability_surface(
                 lon_grid, lat_grid, prob_grid
@@ -253,6 +254,19 @@ def plot_sites_and_source(
                 fontsize=8,
                 zorder=2,
             )
+            if loss_grid.shape == lon_grid.shape and np.isfinite(loss_grid).any():
+                finite_loss = loss_grid[np.isfinite(loss_grid)]
+                if np.ptp(finite_loss) > 0.0:
+                    ax.contour(
+                        lon_grid,
+                        lat_grid,
+                        loss_grid,
+                        levels=8,
+                        colors="black",
+                        alpha=0.25,
+                        linewidths=0.8,
+                        zorder=2,
+                    )
 
     ax.scatter(
         sites_plot["lon"],
@@ -290,7 +304,7 @@ def plot_sites_and_source(
     ax.set_xlabel("Longitude")
     ax.set_ylabel("Latitude")
     title = (
-        "Stations, Trained Source, and Global Loss Region"
+        "Source Confidence Landscape"
         if confidence_map is not None
         else "Stations and Trained Source"
     )

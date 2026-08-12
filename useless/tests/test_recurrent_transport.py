@@ -1,7 +1,10 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import torch
 
 
@@ -23,6 +26,7 @@ from transport_units import (  # noqa: E402
     normalize_diffusivity_m2s,
     normalize_velocity_mps,
 )
+from source_output import export_hourly_concentration_text_outputs  # noqa: E402
 
 
 class TransportUnitTests(unittest.TestCase):
@@ -268,6 +272,61 @@ class TransportUnitTests(unittest.TestCase):
         self.assertTrue(torch.allclose(dense_fields[0], coarse_fields[0]))
         self.assertFalse(torch.allclose(dense_fields[1], linear_midpoint))
         self.assertTrue(torch.equal(model.recurrent_times, coarse_times))
+
+    def test_hourly_text_outputs_are_written_to_both_destinations(self):
+        model = self._ConstantSourceModel()
+        configure_recurrent_context(
+            model,
+            x_min=-1.0,
+            x_max=1.0,
+            y_min=-1.0,
+            y_max=1.0,
+            t_values=[0.0, 1.0],
+            u_values=[0.0, 0.0],
+            v_values=[0.0, 0.0],
+            d_min_norm=0.0,
+            d_scale_norm=0.0,
+            decay_norm=0.0,
+            nx=5,
+            ny=5,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "result"
+            case_dir = root / "20260101_090000_测试污染物"
+            exports = export_hourly_concentration_text_outputs(
+                model=model,
+                output_dir=case_dir,
+                result_root_dir=root,
+                time_labels=pd.to_datetime(["2026-01-01 09:00:00", "2026-01-01 10:00:00"]),
+                t_w=np.array([0.0, 1.0]),
+                u_w=np.array([0.0, 0.0]),
+                v_w=np.array([0.0, 0.0]),
+                baseline_w=np.array([2.0, 3.0]),
+                lon0=117.0,
+                lat0=39.0,
+                x0=0.0,
+                y0=0.0,
+                length_m=1000.0,
+                duration_hours=1.0,
+                c_scale=1.0,
+                sigma_src=0.05,
+                source_lon=117.01,
+                source_lat=39.01,
+            )
+
+            self.assertEqual(exports["hourly_field_count"], 2)
+            self.assertEqual(len(exports["output_directories"]), 2)
+            for directory in map(Path, exports["output_directories"]):
+                source = pd.read_csv(directory / "污染源点坐标.txt", sep="\t", header=None)
+                self.assertEqual(source.shape, (1, 2))
+                field = pd.read_csv(
+                    directory / "浓度场" / "浓度场_20260101_h09.txt",
+                    sep="\t",
+                    header=None,
+                )
+                # The recurrent solver enforces an 8 x 8 minimum grid.
+                self.assertEqual(field.shape, (64, 3))
+                self.assertGreaterEqual(float(field.iloc[:, 2].min()), 2.0)
 
 
 if __name__ == "__main__":

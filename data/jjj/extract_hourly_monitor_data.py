@@ -22,7 +22,7 @@ DEFAULT_SITES_NAME = "sites.xlsx"
 # MONITOR_DATA_DIR: directory containing one Excel file per station.
 # The script scans this directory recursively and reads the second sheet of each
 # .xls/.xlsx station workbook.
-MONITOR_DATA_DIR = r"data\jjj\2026年03-04-05月小时数据"
+MONITOR_DATA_DIR = r"data\jjj\2026年小时数据"
 
 # START_TIME / END_TIME: inclusive extraction time range.
 START_TIME = "2026-04-05 18:00:00"
@@ -38,7 +38,7 @@ TARGET_POLLUTANT = "正戊烷"
 WIND_STATION_NAME = "K1站点（园区中心点位）"
 
 # SITES_FILE_PATH: workbook containing current station location information.
-SITES_FILE_PATH = r"data\jjj\2026年03-04-05月小时数据\当前数据点位信息.xlsx"
+SITES_FILE_PATH = r"data\jjj\2026年小时数据\当前数据点位信息.xlsx"
 
 # OUTPUT_FOLDER:
 # - empty string: save directly into data/jjj/

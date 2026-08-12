@@ -15,9 +15,9 @@ OUTPUT_DIR = DATA_DIR / "abnormal_high_monitor_data"
 DEFAULT_INPUT_FILE_PATH = (
     DATA_DIR
     / "shsh_js"
-    / "自动审核小时数据_标准单位_2026-05-15 00_00_00_2026-06-14 23_00_00.xlsx"
+    / "自动审核小时数据_标准单位_2026-07-01 00_00_00_2026-08-01 12_00_00.xlsx"
 )
-DEFAULT_OUTPUT_NAME = "abnormal_high_monitoar_data.xlsx"
+DEFAULT_OUTPUT_NAME = "abnormal_high_monitoar_data_july.xlsx"
 
 # Only output abnormal records whose concentration is at least this value.
 # Overall pollutant means are still calculated from all data.
@@ -28,6 +28,7 @@ DEFAULT_SKIP_POLLUTANTS: list[str] = [
     "总氮",
     "总氮-参况",
     "氮氧化物(NOx)",
+    "一氧化氮(NO)",
     "一氧化氮(NO)-参况",
     "氮氧化物(NOx)-参况",
     "氮氧化物(NOx)",
@@ -36,6 +37,7 @@ DEFAULT_SKIP_POLLUTANTS: list[str] = [
     "二氧化氮(NO₂)-参况",
     "二氧化硫(SO₂)-参况",
     "非甲烷总烃",
+    "臭氧(O₃)",
 ]
 
 TIME_COLUMN = "时间"

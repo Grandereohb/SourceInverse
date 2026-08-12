@@ -1,5 +1,4 @@
 import math
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -87,13 +86,9 @@ def export_q_time_series(
     model,
     t_values,
     time_labels,
-    output_dir,
     q_min=None,
     q_max=None,
 ):
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
     t_values = np.asarray(t_values, dtype=np.float32)
     if time_labels is None:
         time_labels = t_values
@@ -127,8 +122,6 @@ def export_q_time_series(
             "logQ": logq_values,
         }
     )
-    q_df.to_csv(output_dir / "q_time_series.csv", index=False, encoding="utf-8-sig")
-
     seg_rows = []
     if q_mode == "piecewise":
         for seg_id in sorted(set(segment_ids.tolist())):
@@ -155,5 +148,4 @@ def export_q_time_series(
             }
         )
     seg_df = pd.DataFrame(seg_rows)
-    seg_df.to_csv(output_dir / "q_segments.csv", index=False, encoding="utf-8-sig")
     return q_df, seg_df

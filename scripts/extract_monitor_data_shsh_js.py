@@ -18,15 +18,15 @@ DEFAULT_WIND_NAME = "wind.xlsx"
 # Manual Inputs
 # =========================
 # INPUT_FILE_PATH: source workbook path. Relative paths are resolved from the repo root.
-INPUT_FILE_PATH = 'data/shsh_js/自动审核小时数据_标准单位_2026-05-15 00_00_00_2026-06-14 23_00_00.xlsx'
+INPUT_FILE_PATH = 'data/shsh_js/自动审核小时数据_标准单位_2026-07-01 00_00_00_2026-08-01 12_00_00.xlsx'
 # START_TIME / END_TIME: inclusive extraction time range.
-START_TIME = '2026-06-13 00:00:00'
-END_TIME = '2026-06-13 13:00:00'
+START_TIME = '2026-07-09 02:00:00'
+END_TIME = '2026-07-09 14:00:00'
 # TARGET_POLLUTANT: pollutant column name to extract.
 TARGET_POLLUTANT = '乙烯'
 # WIND_STATION_NAME: use this station sheet's wind direction/speed to build wind.xlsx.
 # Leave empty to keep the old behavior: average wind from all station sheets.
-WIND_STATION_NAME = '上石化边界卫二路站'
+WIND_STATION_NAME = '上石化园区卫四路站'
 # OUTPUT_FOLDER:
 # - empty string: save directly into data/
 # - relative path: save into data/<OUTPUT_FOLDER>/

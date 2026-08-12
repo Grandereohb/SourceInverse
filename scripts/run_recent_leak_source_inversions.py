@@ -20,30 +20,32 @@ ABNORMAL_DIR = DATA_DIR / "abnormal_high_monitor_data"
 PINN_SCRIPT = REPO_ROOT / "pinn_source" / "pinn_source_pinn.py"
 PINN_CONFIG = REPO_ROOT / "pinn_source" / "config.py"
 
-# INPUT_FILE_PATH = ABNORMAL_DIR / "abnormal_high_vocs_odorous_gases.xlsx"
+INPUT_FILE_PATH = ABNORMAL_DIR / "abnormal_high_monitoar_data_july.xlsx"
 
-# MONITOR_INPUT_PATH = (
-#     DATA_DIR
-#     / "shsh_js"
-#     / "自动审核小时数据_标准单位_2026-05-15 00_00_00_2026-06-14 23_00_00.xlsx"
-# )
+MONITOR_INPUT_PATH = (
+    DATA_DIR
+    / "shsh_js"
+    / "自动审核小时数据_标准单位_2026-07-01 00_00_00_2026-08-01 12_00_00.xlsx"
+)
 
-# EXTRACT_SCRIPT_KEY = "shsh_js"
-# EXTRACT_OUTPUT_FOLDER = "shsh_js"
+EXTRACT_SCRIPT_KEY = "shsh_js"
+EXTRACT_OUTPUT_FOLDER = "shsh_js"
 
 # Abnormal-high event workbook to traverse. This must point to a concrete Excel
 # file with an `abnormal_high_records` sheet, not just a directory.
-INPUT_FILE_PATH = ABNORMAL_DIR / "abnormal_high_monitor_data_jjj_may.xlsx"
-MONITOR_INPUT_PATH = DATA_DIR / "jjj" / "2026年03-04-05月小时数据" / "5月小时数据"
-EXTRACT_SCRIPT_KEY = "jjj"
-EXTRACT_OUTPUT_FOLDER = ""
+# INPUT_FILE_PATH = ABNORMAL_DIR / "abnormal_high_monitor_data_jjj_567.xlsx"
+# MONITOR_INPUT_PATH = (
+#     DATA_DIR / "jjj" / "2026年小时数据" / "567月小时数据_标准单位_汇总.xlsx"
+# )
+# EXTRACT_SCRIPT_KEY = "jjj"
+# EXTRACT_OUTPUT_FOLDER = ""
 
 
 # =========================
 # Manual Inputs
 # =========================
 # SOURCE_INVERSION_COUNT: number of leak events to run in sequence.
-SOURCE_INVERSION_COUNT = 15
+SOURCE_INVERSION_COUNT = 30
 
 # TRAVERSE_DIRECTION:
 # - "backward": traverse leak events from later time to earlier time.
@@ -53,12 +55,18 @@ TRAVERSE_DIRECTION = "backward"
 # START_TRAVERSE_TIME:
 # - empty string: start from latest leak for "backward", earliest leak for "forward".
 # - "YYYY-MM-DD HH:MM:SS": start traversing from this time.
-START_TRAVERSE_TIME = ""
+START_TRAVERSE_TIME = "2026-07-20 00:00:00"
 
 # POLLUTANT_CONTAINS:
 # - empty string: include all pollutants.
 # - non-empty string: only include leak events whose pollutant name contains it.
 POLLUTANT_CONTAINS = ""
+
+# MANUAL_INPUT:
+# - empty list: include all pollutants (subject to POLLUTANT_CONTAINS above).
+# - non-empty list: only run leak events whose pollutant name exactly matches
+#   one of these names. Example: ["乙烯", "硫化氢(H₂S)"].
+MANUAL_INPUT: list[str] = [""]
 
 
 def resolve_extract_script(output_folder: str) -> Path:
@@ -153,6 +161,7 @@ def select_leaks(
     start_time: str | None = None,
     start_rank: int | None = None,
     pollutant_contains: str | None = None,
+    manual_input: list[str] | tuple[str, ...] | None = None,
 ) -> list[tuple[int, dict]]:
     if count <= 0:
         raise ValueError("count must be > 0")
@@ -178,6 +187,16 @@ def select_leaks(
     pollutant_filter = str(pollutant_contains or "").strip()
     if pollutant_filter:
         ordered = [row for row in ordered if pollutant_filter in str(row["pollutant"])]
+
+    manual_pollutants = {
+        str(pollutant).strip()
+        for pollutant in (manual_input or [])
+        if str(pollutant).strip()
+    }
+    if manual_pollutants:
+        ordered = [
+            row for row in ordered if str(row["pollutant"]).strip() in manual_pollutants
+        ]
 
     if start_rank is not None:
         if start_rank < 1:
@@ -384,6 +403,7 @@ def run_recent_leak_source_inversions(
     start_time: str | None = START_TRAVERSE_TIME,
     start_rank: int | None = None,
     pollutant_contains: str | None = POLLUTANT_CONTAINS,
+    manual_input: list[str] | tuple[str, ...] | None = MANUAL_INPUT,
     input_file_path: str | Path = INPUT_FILE_PATH,
     monitor_input_path: str | Path = MONITOR_INPUT_PATH,
     extract_script_key: str = EXTRACT_SCRIPT_KEY,
@@ -405,6 +425,7 @@ def run_recent_leak_source_inversions(
         start_time=start_time,
         start_rank=start_rank,
         pollutant_contains=pollutant_contains,
+        manual_input=manual_input,
     )
     if not selected_leaks:
         raise ValueError(
@@ -430,6 +451,11 @@ def run_recent_leak_source_inversions(
                     "traverse_direction": direction,
                     "start_traverse_time": start_time,
                     "pollutant_contains": pollutant_contains,
+                    "manual_input": ", ".join(
+                        str(pollutant).strip()
+                        for pollutant in (manual_input or [])
+                        if str(pollutant).strip()
+                    ),
                     "pollutant": leak["pollutant"],
                     "leak_start": leak["leak_start"],
                     "leak_end": leak["leak_end"],
@@ -574,6 +600,7 @@ def main() -> None:
         start_time=args.start_time,
         start_rank=args.start_rank,
         pollutant_contains=args.pollutant_contains,
+        manual_input=MANUAL_INPUT,
         input_file_path=args.input_file,
         monitor_input_path=args.monitor_input,
         extract_script_key=args.extract_script_key,

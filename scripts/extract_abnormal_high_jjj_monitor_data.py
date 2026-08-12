@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# Before running this script, use combine_jjj_hourly_monitor_workbooks.py to
+# generate the multi-station JJJ monitor workbook from the raw station files.
+
 import argparse
 import re
 import sys
@@ -8,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 from extract_abnormal_high_monitor_data import (
-    DEFAULT_SKIP_POLLUTANTS,
+    DEFAULT_SKIP_POLLUTANTS as BASE_DEFAULT_SKIP_POLLUTANTS,
     extract_numeric,
     find_abnormal_high_records,
     normalize_pollutant_name,
@@ -22,14 +25,23 @@ REPO_ROOT = SCRIPT_DIR.parent
 DATA_DIR = REPO_ROOT / "data"
 OUTPUT_DIR = DATA_DIR / "abnormal_high_monitor_data"
 
-DEFAULT_INPUT_DIR = DATA_DIR / "jjj" / "2026年03-04-05月小时数据" / "5月小时数据"
-DEFAULT_OUTPUT_NAME = "abnormal_high_monitor_data_jjj_may.xlsx"
+DEFAULT_INPUT_PATH = (
+    DATA_DIR / "jjj" / "2026年小时数据" / "567月小时数据_标准单位_汇总.xlsx"
+)
+DEFAULT_OUTPUT_NAME = "abnormal_high_monitor_data_jjj_567.xlsx"
 
 # Only output abnormal records whose concentration is at least this value.
 # Overall pollutant means are still calculated from all data.
-MIN_CONCENTRATION_THRESHOLD = 800.0
+MIN_CONCENTRATION_THRESHOLD = 600.0
 TIME_COLUMN = "时间"
-SHEET_INDEX = 1
+
+# Pollutants in this list are excluded from both threshold calculation and output.
+DEFAULT_SKIP_POLLUTANTS: list[str] = list(BASE_DEFAULT_SKIP_POLLUTANTS)
+
+# Empty means keep all pollutants not present in DEFAULT_SKIP_POLLUTANTS.
+# When non-empty, only pollutants matching this list are retained.
+MANUAL_INPUT: list[str] = []
+
 NON_POLLUTANT_COLUMNS = {
     TIME_COLUMN,
     "温度",
@@ -46,12 +58,8 @@ def clean_column_name(value) -> str:
     return str(value).strip()
 
 
-def clean_station_name_from_path(path: Path) -> str:
-    stem = path.stem.strip()
-    marker = "_站点监测数据_"
-    if marker in stem:
-        return stem.split(marker, 1)[0].strip()
-    return stem
+def clean_station_name(sheet_name: str) -> str:
+    return re.sub(r"[（(]带标识[）)]$", "", str(sheet_name).strip()).strip()
 
 
 def clean_pollutant_name_for_output(name: str) -> str:
@@ -74,32 +82,15 @@ def is_non_pollutant_column(column: str) -> bool:
     )
 
 
-def find_header_row(raw_df: pd.DataFrame, source_path: Path) -> int:
-    for idx, row in raw_df.iterrows():
-        values = {clean_column_name(value) for value in row.tolist()}
-        if TIME_COLUMN in values:
-            return int(idx)
-    raise ValueError(f"Could not find '{TIME_COLUMN}' header row in {source_path}")
-
-
-def load_jjj_station_table(path: Path, sheet_index: int = SHEET_INDEX) -> pd.DataFrame:
-    workbook = pd.ExcelFile(path)
-    if len(workbook.sheet_names) <= sheet_index:
-        raise ValueError(
-            f"Workbook does not contain sheet index {sheet_index + 1}: {path}"
-        )
-
-    sheet_name = workbook.sheet_names[sheet_index]
-    raw_df = pd.read_excel(workbook, sheet_name=sheet_name, header=None)
-    header_row = find_header_row(raw_df, path)
-
-    columns = [clean_column_name(value) for value in raw_df.iloc[header_row].tolist()]
-    table = raw_df.iloc[header_row + 1 :].copy()
-    table.columns = columns
-    table = table.loc[:, [bool(str(col).strip()) for col in table.columns]]
+def load_jjj_station_table(workbook: pd.ExcelFile, sheet_name: str) -> pd.DataFrame:
+    table = pd.read_excel(workbook, sheet_name=sheet_name)
+    table.columns = [clean_column_name(column) for column in table.columns]
+    table = table.loc[:, [bool(str(column).strip()) for column in table.columns]]
 
     if TIME_COLUMN not in table.columns:
-        raise ValueError(f"Parsed table does not contain '{TIME_COLUMN}': {path}")
+        raise ValueError(
+            f"Parsed station sheet does not contain '{TIME_COLUMN}': {sheet_name}"
+        )
 
     table[TIME_COLUMN] = pd.to_datetime(
         table[TIME_COLUMN], errors="coerce", format="mixed"
@@ -108,61 +99,69 @@ def load_jjj_station_table(path: Path, sheet_index: int = SHEET_INDEX) -> pd.Dat
     return table
 
 
+def pollutant_name_keys(name: str) -> set[str]:
+    return {
+        normalize_pollutant_name(name),
+        normalize_pollutant_name(clean_pollutant_name_for_output(name)),
+    }
+
+
 def pollutant_columns(
-    df: pd.DataFrame, skip_pollutants: list[str] | None = None
+    df: pd.DataFrame,
+    skip_pollutants: list[str] | None = None,
+    manual_input: list[str] | None = None,
 ) -> list[str]:
-    skip_set: set[str] = set()
-    for name in skip_pollutants or []:
-        if not str(name).strip():
-            continue
-        skip_set.add(normalize_pollutant_name(name))
-        skip_set.add(normalize_pollutant_name(clean_pollutant_name_for_output(name)))
+    skip_set = {
+        key
+        for name in (skip_pollutants or [])
+        if str(name).strip()
+        for key in pollutant_name_keys(name)
+    }
+    manual_set = {
+        key
+        for name in (manual_input or [])
+        if str(name).strip()
+        for key in pollutant_name_keys(name)
+    }
 
     out: list[str] = []
     for col in df.columns:
         column = str(col).strip()
         if is_non_pollutant_column(column):
             continue
-        column_keys = {
-            normalize_pollutant_name(column),
-            normalize_pollutant_name(clean_pollutant_name_for_output(column)),
-        }
+        column_keys = pollutant_name_keys(column)
         if column_keys & skip_set:
+            continue
+        if manual_set and not column_keys & manual_set:
             continue
         out.append(column)
     return out
 
 
 def build_long_monitor_table(
-    input_dir: str | Path,
+    input_path: str | Path,
     skip_pollutants: list[str] | None = None,
-    sheet_index: int = SHEET_INDEX,
+    manual_input: list[str] | None = None,
 ) -> pd.DataFrame:
-    directory = resolve_path(input_dir)
-    if not directory.exists():
-        raise FileNotFoundError(f"Input directory not found: {directory}")
-    if not directory.is_dir():
-        raise NotADirectoryError(f"Input path is not a directory: {directory}")
-
-    files = sorted(
-        [
-            path
-            for pattern in ("*.xls", "*.xlsx")
-            for path in directory.glob(pattern)
-            if not path.name.startswith("~$")
-        ]
-    )
-    if not files:
-        raise FileNotFoundError(f"No Excel files found in input directory: {directory}")
+    path = resolve_path(input_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Input workbook not found: {path}")
+    if not path.is_file():
+        raise IsADirectoryError(f"Input path must be an Excel workbook: {path}")
 
     rows: list[pd.DataFrame] = []
-    for path in files:
-        station_name = clean_station_name_from_path(path)
-        table = load_jjj_station_table(path, sheet_index=sheet_index)
+    workbook = pd.ExcelFile(path)
+    for sheet_name in workbook.sheet_names:
+        station_name = clean_station_name(sheet_name)
+        table = load_jjj_station_table(workbook, sheet_name)
         if table.empty:
             continue
 
-        for pollutant in pollutant_columns(table, skip_pollutants=skip_pollutants):
+        for pollutant in pollutant_columns(
+            table,
+            skip_pollutants=skip_pollutants,
+            manual_input=manual_input,
+        ):
             values = table[pollutant].map(extract_numeric)
             output_pollutant = clean_pollutant_name_for_output(pollutant)
             pollutant_rows = pd.DataFrame(
@@ -171,13 +170,13 @@ def build_long_monitor_table(
                     "pollutant": output_pollutant,
                     "time": table[TIME_COLUMN],
                     "concentration": values,
-                    "source_file": path.name,
+                    "source_sheet": sheet_name,
                 }
             )
             rows.append(pollutant_rows)
 
     if not rows:
-        raise ValueError("No monitor rows were parsed from the input directory.")
+        raise ValueError("No monitor rows were parsed from the input workbook.")
 
     long_df = pd.concat(rows, ignore_index=True)
     long_df = long_df.dropna(subset=["concentration"]).reset_index(drop=True)
@@ -187,20 +186,20 @@ def build_long_monitor_table(
 
 
 def extract_abnormal_high_jjj_monitor_data(
-    input_dir: str | Path,
+    input_path: str | Path,
     output_path: str | Path | None = None,
     multiplier: float = 5.0,
     min_concentration: float = MIN_CONCENTRATION_THRESHOLD,
     skip_pollutants: list[str] | None = None,
-    sheet_index: int = SHEET_INDEX,
+    manual_input: list[str] | None = MANUAL_INPUT,
 ) -> Path:
     if output_path is None:
         output_path = OUTPUT_DIR / DEFAULT_OUTPUT_NAME
 
     long_df = build_long_monitor_table(
-        input_dir=input_dir,
+        input_path=input_path,
         skip_pollutants=skip_pollutants,
-        sheet_index=sheet_index,
+        manual_input=manual_input,
     )
     abnormal_df, means_df = find_abnormal_high_records(
         long_df=long_df,
@@ -213,16 +212,15 @@ def extract_abnormal_high_jjj_monitor_data(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Find abnormal high concentration records from jjj station workbooks. "
-            "Each station is stored in a separate Excel file and sheet2 contains "
-            "the hourly monitor table."
+            "Find abnormal high concentration records from a JJJ multi-sheet "
+            "hourly monitor workbook. Each sheet represents one station."
         )
     )
     parser.add_argument(
-        "input_dir",
+        "input_path",
         nargs="?",
-        default=str(DEFAULT_INPUT_DIR),
-        help="Directory containing station Excel workbooks.",
+        default=str(DEFAULT_INPUT_PATH),
+        help="Multi-sheet JJJ hourly monitor workbook.",
     )
     parser.add_argument(
         "--output",
@@ -251,10 +249,10 @@ def parse_args() -> argparse.Namespace:
         help="Pollutant names to skip entirely.",
     )
     parser.add_argument(
-        "--sheet-index",
-        type=int,
-        default=SHEET_INDEX,
-        help="Zero-based sheet index containing monitor data. Default 1 means sheet2.",
+        "--manual-input",
+        nargs="*",
+        default=MANUAL_INPUT,
+        help="Only retain these pollutant names. Empty means retain all non-skipped pollutants.",
     )
     return parser.parse_args()
 
@@ -267,21 +265,22 @@ def safe_console_text(value) -> str:
 def main() -> None:
     args = parse_args()
     output_path = extract_abnormal_high_jjj_monitor_data(
-        input_dir=args.input_dir,
+        input_path=args.input_path,
         output_path=args.output,
         multiplier=args.multiplier,
         min_concentration=args.min_concentration,
         skip_pollutants=args.skip_pollutants,
-        sheet_index=args.sheet_index,
+        manual_input=args.manual_input,
     )
-    print(f"Input directory: {resolve_path(args.input_dir)}")
-    print(f"Monitor data sheet index: {args.sheet_index} (zero-based)")
+    print(f"Input workbook: {resolve_path(args.input_path)}")
     print(f"Threshold: concentration > {args.multiplier:g} * pollutant overall mean")
     print(f"Minimum output concentration: {args.min_concentration:g}")
     if args.skip_pollutants:
         print(
             safe_console_text("Skipped pollutants: " + ", ".join(args.skip_pollutants))
         )
+    if args.manual_input:
+        print(safe_console_text("Retained pollutants: " + ", ".join(args.manual_input)))
     print(f"Saved abnormal high monitor table: {output_path}")
 
 

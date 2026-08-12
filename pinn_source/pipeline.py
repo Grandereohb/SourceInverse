@@ -114,6 +114,7 @@ from q_parameterization import (
     export_q_time_series,
 )
 from source_landscape import compute_source_loss_landscape
+from source_output import export_hourly_concentration_text_outputs
 from transport_units import (
     normalize_decay_per_hour,
     normalize_diffusivity_m2s,
@@ -1388,13 +1389,38 @@ def run(
 
     print("Estimated source (x,y) meters:", xs_p, ys_p)
     print("Estimated source (lat,lon):", pred_lat, pred_lon)
-    export_q_time_series(
+    q_time_series_df, q_segments_df = export_q_time_series(
         model=model,
         t_values=t_w,
         time_labels=time_w_labels,
-        output_dir=output_dir,
         q_min=Q_MIN,
         q_max=Q_MAX,
+    )
+
+    inversion_text_exports = export_hourly_concentration_text_outputs(
+        model=model,
+        output_dir=output_dir,
+        result_root_dir=OUTPUT_DIR,
+        time_labels=time_w_labels,
+        t_w=t_w,
+        u_w=u_w,
+        v_w=v_w,
+        baseline_w=baseline_w,
+        lon0=lon0,
+        lat0=lat0,
+        x0=x0,
+        y0=y0,
+        length_m=L,
+        duration_hours=T,
+        c_scale=c_scale,
+        sigma_src=SIGMA_SRC,
+        source_lon=pred_lon,
+        source_lat=pred_lat,
+    )
+    print(
+        "Saved inversion text outputs: "
+        f"hourly_fields={inversion_text_exports['hourly_field_count']}, "
+        + ", ".join(inversion_text_exports["output_directories"])
     )
 
     xyt_diag = torch.cat([x_obs_t, y_obs_t, t_obs_t], dim=1)
@@ -1410,12 +1436,7 @@ def run(
         else:
             pred_diag_raw = pred_diag * c_scale
 
-    if diagnostic_rows:
-        diag_path = output_dir / "training_diagnostics.csv"
-        pd.DataFrame(diagnostic_rows).to_csv(
-            diag_path, index=False, encoding="utf-8-sig"
-        )
-        print(f"Saved training diagnostics: {diag_path}")
+    training_diagnostics_df = pd.DataFrame(diagnostic_rows)
 
     pred_diag_np = pred_diag.detach().cpu().numpy().reshape(-1)
     pred_diag_raw_np = pred_diag_raw.detach().cpu().numpy().reshape(-1)
@@ -1482,12 +1503,7 @@ def run(
                 "rmse_fit": float(np.sqrt(np.mean((pred_fit_s - obs_fit_s) ** 2))),
             }
         )
-    if station_peak_rows:
-        peak_path = output_dir / "station_peak_diagnostics.csv"
-        pd.DataFrame(station_peak_rows).to_csv(
-            peak_path, index=False, encoding="utf-8-sig"
-        )
-        print(f"Saved station peak diagnostics: {peak_path}")
+    station_peak_diagnostics_df = pd.DataFrame(station_peak_rows)
 
     quality_warnings = []
     quality_diagnostics = {}
@@ -1674,6 +1690,7 @@ def run(
             "domain_y_max_m": float(source_y_max_p),
             "min_boundary_margin_m": float(source_margin_m),
         },
+        "inversion_text_outputs": inversion_text_exports,
         "fit_raw_rmse": fit_rmse_quality,
         "field_components": {
             "plume_mean": float(np.mean(plume_diag_np)),
@@ -1690,6 +1707,7 @@ def run(
     }
 
     landscape = None
+    source_landscape_df = pd.DataFrame()
     confidence_map = None
     if USE_SOURCE_LANDSCAPE_CONFIDENCE and run_id is None:
         print(
@@ -1698,11 +1716,9 @@ def run(
             f"step={SOURCE_LANDSCAPE_STEP_M} m"
         )
         use_source_domain_landscape = str(SOURCE_LANDSCAPE_MODE).lower() == "source_domain"
-        landscape = compute_source_loss_landscape(
+        landscape, source_landscape_df = compute_source_loss_landscape(
             model=model,
             device=device,
-            output_dir=output_dir,
-            sites_plot=sites_plot,
             lon0=lon0,
             lat0=lat0,
             x0=x0,
@@ -1727,23 +1743,28 @@ def run(
                 (source_y_min_p, source_y_max_p) if use_source_domain_landscape else None
             ),
         )
-        prob_path = output_dir / "source_probability_map.csv"
-        if prob_path.exists():
-            prob_df = pd.read_csv(prob_path)
-            x_cols = np.sort(prob_df["x"].unique())
-            y_rows = np.sort(prob_df["y"].unique())
+        if not source_landscape_df.empty:
+            x_cols = np.sort(source_landscape_df["x"].unique())
+            y_rows = np.sort(source_landscape_df["y"].unique())
             prob_grid = (
-                prob_df.pivot(index="y", columns="x", values="probability")
+                source_landscape_df.pivot(
+                    index="y", columns="x", values="probability"
+                )
                 .reindex(index=y_rows, columns=x_cols)
                 .to_numpy(dtype=float)
             )
             lon_grid = (
-                prob_df.pivot(index="y", columns="x", values="lon")
+                source_landscape_df.pivot(index="y", columns="x", values="lon")
                 .reindex(index=y_rows, columns=x_cols)
                 .to_numpy(dtype=float)
             )
             lat_grid = (
-                prob_df.pivot(index="y", columns="x", values="lat")
+                source_landscape_df.pivot(index="y", columns="x", values="lat")
+                .reindex(index=y_rows, columns=x_cols)
+                .to_numpy(dtype=float)
+            )
+            loss_grid = (
+                source_landscape_df.pivot(index="y", columns="x", values="loss")
                 .reindex(index=y_rows, columns=x_cols)
                 .to_numpy(dtype=float)
             )
@@ -1751,13 +1772,8 @@ def run(
                 "lon_grid": lon_grid,
                 "lat_grid": lat_grid,
                 "prob_grid": prob_grid,
+                "loss_grid": loss_grid,
             }
-            print(
-                "Saved source confidence outputs: "
-                f"{output_dir / 'source_confidence_landscape.png'}, "
-                f"{output_dir / 'source_confidence_landscape.json'}, "
-                f"{prob_path}"
-            )
         if landscape is not None and "best" in landscape:
             best_landscape = landscape["best"]
             landscape_dx = float(best_landscape["x"]) - float(xs_p)
@@ -1765,18 +1781,7 @@ def run(
             landscape_distance = float(math.sqrt(landscape_dx**2 + landscape_dy**2))
             quality_payload["landscape_best"] = best_landscape
             quality_payload["landscape_distance_m"] = landscape_distance
-            quality_payload["source_landscape"] = {
-                "scan_mode": landscape.get("scan_mode"),
-                "interpretation": landscape.get("interpretation"),
-                "trained_source": landscape.get("trained_source"),
-                "trained_to_landscape_best_distance_m": landscape.get(
-                    "trained_to_landscape_best_distance_m"
-                ),
-                "landscape_best_boundary_margin_m": landscape.get(
-                    "landscape_best_boundary_margin_m"
-                ),
-                "warnings": landscape.get("warnings", []),
-            }
+            quality_payload["source_landscape"] = landscape
             if (
                 landscape.get("scan_mode") == "source_domain"
                 and landscape_distance > 500.0
@@ -1789,6 +1794,29 @@ def run(
                     quality_warnings.append(warning)
             quality_payload["warnings"] = quality_warnings
             quality_payload["is_reasonable"] = len(quality_warnings) == 0
+
+    diagnostic_tables = {
+        "q_time_series": q_time_series_df,
+        "q_segments": q_segments_df,
+        "training": training_diagnostics_df,
+        "station_peaks": station_peak_diagnostics_df,
+        "source_landscape": source_landscape_df,
+    }
+    diagnostic_tables = {
+        name: table for name, table in diagnostic_tables.items() if not table.empty
+    }
+    diagnostics_path = output_dir / "diagnostics.xlsx"
+    with pd.ExcelWriter(diagnostics_path, engine="openpyxl") as writer:
+        for sheet_name, table in diagnostic_tables.items():
+            table.to_excel(writer, sheet_name=sheet_name, index=False)
+    quality_payload["diagnostics"] = {
+        "workbook": str(diagnostics_path),
+        "sheets": list(diagnostic_tables),
+    }
+    print(
+        f"Saved consolidated diagnostics: {diagnostics_path} "
+        f"(sheets={', '.join(diagnostic_tables)})"
+    )
 
     quality_path = output_dir / "result_quality_report.json"
     with open(quality_path, "w", encoding="utf-8") as f:
@@ -1815,9 +1843,7 @@ def run(
         print(f"Saved station time-series plot: {station_timeseries_path}")
 
         sites_source_path = output_dir / (
-            "sites_source_confidence.png"
-            if confidence_map is not None
-            else "sites_source.png"
+            "source_confidence.png" if confidence_map is not None else "sites_source.png"
         )
         plot_sites_and_source(
             sites_plot,
