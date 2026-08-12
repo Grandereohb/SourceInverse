@@ -1,0 +1,42 @@
+{
+  "request_id": "client-20260811-001",
+  "job_id": "a816c3e2-0f70-4b68-a9a0-cc6b0444b80d",
+  "status": "completed",
+  "pollutant": "乙烯",
+  "concentration_unit": "ug/m3",
+  "coordinate_system": "WGS84",
+  "source": {
+    "longitude": 121.31000000,
+    "latitude": 30.72000000
+  },
+  "release_strength": [
+    {
+      "time": "2026-08-11 00:00:00",
+      "value": 12.35000000,
+      "unit": "model_unit"
+    }
+  ],
+  "fields": [
+    {
+      "time": "2026-08-11 00:00:00",
+      "points": [
+        {
+          "longitude": 121.25947571,
+          "latitude": 30.69437790,
+          "concentration": 3.51500010
+        },
+        {
+          "longitude": 121.26147461,
+          "latitude": 30.69437790,
+          "concentration": 3.51500010
+        }
+      ]
+    }
+  ],
+  "quality": {
+    "is_reasonable": true,
+    "warnings": []
+  },
+  "completed_at": "2026-08-11 00:08:35",
+  "algorithm_version": "git-commit-or-release-tag"
+}
