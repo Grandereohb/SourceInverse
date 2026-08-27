@@ -1,0 +1,24 @@
+services:
+  source-inversion:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    image: source-inversion:cpu
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      SOURCE_INVERSION_API_TOKEN: "change-me"
+      SOURCE_INVERSION_CALLBACK_TOKEN: "change-me"
+      SOURCE_INVERSION_QUEUE_SIZE: "8"
+      SOURCE_INVERSION_MAX_BODY_BYTES: "10485760"
+      SOURCE_INVERSION_CALLBACK_TIMEOUT_SECONDS: "30"
+      SOURCE_INVERSION_CALLBACK_RETRY_DELAYS_SECONDS: "0,60,300"
+      SOURCE_INVERSION_CALLBACK_ALLOWED_HOSTS: "client.example.com"
+      OMP_NUM_THREADS: "4"
+      MKL_NUM_THREADS: "4"
+    volumes:
+      - source-inversion-data:/data/jobs
+
+volumes:
+  source-inversion-data:

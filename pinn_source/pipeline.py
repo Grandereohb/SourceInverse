@@ -442,6 +442,7 @@ def run(
     wind_path,
     random_seed=0,
     output_dir=None,
+    result_root_dir=None,
     make_plots=None,
     run_id=None,
     result_name_suffix=None,
@@ -915,9 +916,10 @@ def run(
     else:
         print("Q mode: neural")
     print("Source position mode: single")
+    training_epochs = max(_env_int("PINN_EPOCHS", EPOCHS), 1)
     print(
         "Training speed settings: "
-        f"epochs={EPOCHS}, field_mode={FIELD_MODE}, "
+        f"epochs={training_epochs}, field_mode={FIELD_MODE}, "
         f"landscape_step={SOURCE_LANDSCAPE_STEP_M}m, "
         f"gif={DIFFUSION_N_FRAMES}x{DIFFUSION_NX}x{DIFFUSION_NY}@{DIFFUSION_FPS}fps"
     )
@@ -1004,7 +1006,7 @@ def run(
 
     diagnostic_rows = []
 
-    for epoch in range(1, EPOCHS + 1):
+    for epoch in range(1, training_epochs + 1):
         sync_device()
         epoch_start_time = time.perf_counter()
         timing_data_forward = 0.0
@@ -1400,7 +1402,7 @@ def run(
     inversion_text_exports = export_hourly_concentration_text_outputs(
         model=model,
         output_dir=output_dir,
-        result_root_dir=OUTPUT_DIR,
+        result_root_dir=result_root_dir or OUTPUT_DIR,
         time_labels=time_w_labels,
         t_w=t_w,
         u_w=u_w,

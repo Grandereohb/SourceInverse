@@ -32,6 +32,7 @@ Every recurrent-PDE run exports database-friendly TXT files twice: under the
 case result directory and under `<OUTPUT_DIR>/溯源输出/<case-name>/`.
 
 - `污染源点坐标.txt`: one tab-separated `longitude, latitude` row.
+- `源强.txt`: one tab-separated `time, model source strength` row per whole hour.
 - `浓度场/浓度场_YYYYMMDD_hHH.txt`: one row per recurrent grid cell with
   tab-separated `longitude, latitude, predicted_total_concentration` values.
 

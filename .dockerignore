@@ -1,0 +1,14 @@
+.git
+.venv
+.venv_clean
+__pycache__
+*.pyc
+data
+result
+outputs
+deployment_runs
+useless
+.vscode
+*.pptx
+*.xlsx
+*.xls

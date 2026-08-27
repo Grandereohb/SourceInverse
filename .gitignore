@@ -27,3 +27,4 @@ Thumbs.db
 result/
 outputs/
 diffusion.gif
+deployment_runs/

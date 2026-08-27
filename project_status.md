@@ -2975,3 +2975,138 @@ Explained the time representation used by `pipeline.py`:
 - Re-evaluated the 45 existing cases using `fields[].points[]` objects with `longitude`, `latitude`, and `concentration`. A representative 13-hour case is about 1.30 MB uncompressed and 119 KB with gzip; the largest current 21-hour case is about 2.11 MB uncompressed and 188 KB with gzip.
 - This explicit point-object JSON remains practical over HTTP. Recommend prioritizing parseability, enabling gzip, enforcing exactly 1,296 points per hourly field for the current 36 x 36 grid, and retaining a 10 MB response-size allowance for future grid growth.
 - Confirmed that the integration can use HTTP POST in both directions: the client submits an inversion job with `POST /api/v1/jobs`, and the deployment service sends the completed result JSON to the client's callback URL with another POST request.
+
+### 2026-08-12 HTTP Interface Protocol v1 Draft
+
+- Reviewed the confirmed `proto/input.json` request example and kept its business fields unchanged.
+- Added `proto/API_PROTOCOL.md` covering asynchronous POST submission, status query, result callback, gzip, idempotency, validation rules, HTTP errors, result ordering, and v1 versioning.
+- Added JSON Schema files for job input and result callback, plus examples for HTTP 202 acceptance, job status, successful callback, and error response.
+- The callback concentration-field contract explicitly includes longitude, latitude, and concentration in every point object, matching the client's parsing requirement.
+- Kept release strength in `model_unit` pending physical source-rate calibration.
+- Listed unresolved integration decisions for client confirmation: authentication, callback allow-listing and retry policy, minimum valid data volume, time sampling, accepted concentration units, decimal precision, callback diagnostic scope, and result retention/download requirements.
+- Reviewed protocol-file complexity and recommended reducing the current draft to three client-facing files during the agreement stage: `API_PROTOCOL.md`, `input.json`, and `output.json`. FastAPI/Pydantic can generate OpenAPI and JSON Schema during implementation, while acceptance, status, and error examples can be embedded in the protocol document instead of maintained as separate files.
+- Applied the protocol simplification: retained only `API_PROTOCOL.md`, `input.json`, and `output.json`; merged acceptance, status, and error examples into the protocol document; removed separately maintained JSON Schema and auxiliary example files.
+
+### 2026-08-12 Local Deployment Adapter Design
+
+- Planned the next deployment phase without changing code: a local adapter outside `pinn_source/` will validate `proto/input.json`, create one isolated job directory, convert JSON into the existing `sites.xlsx`, `concentration.xlsx`, and `wind.xlsx` formats, invoke `pipeline.run(...)` once, assemble `proto/output.json`, and package delivery artifacts.
+- Input conversion can use the existing supported formats directly: `sites.xlsx` as `station/lon/lat`, `concentration.xlsx` as a time-by-station wide table plus `TARGET_POLLUTANT`, and `wind.xlsx` as `time/dir/sp`.
+- The adapter should run the algorithm in a child process with `PINN_DEVICE=cpu` and `PINN_AUTO_CLOSE_PLOTS=1`, capture stdout/stderr, persist `job.json`, and treat every request as an independent directory to prevent cross-job file contamination.
+- Source coordinates should come from the `pipeline.run()` result or `result_quality_report.json`; release strength should come from the `q_time_series` sheet in `diagnostics.xlsx` and remain `model_unit`; hourly fields should be assembled from the exported TXT paths recorded in `result_quality_report.json`.
+- Recommended delivery contents are `output.json`, `manifest.json`, `algorithm_output/`, and `logs/`, with an optional ZIP for local handoff. The HTTP phase can later send the same `output.json` unchanged.
+- Identified one small core compatibility issue for later implementation: `pipeline.py` passes global `config.OUTPUT_DIR` into hourly TXT export even when a per-job `output_dir` is supplied. The hard-coded Windows result root must eventually become an optional argument or environment override for Linux, while preserving the current default behavior.
+- Input validation still needs a final product decision on minimum stations and time coverage. The current one-station, one-time example demonstrates syntax only and is not sufficient for a trustworthy inversion run.
+
+### 2026-08-12 Hourly Source Strength TXT Output
+
+- Extended the existing source-inversion TXT exporter to write `源强.txt` alongside the source coordinate and hourly concentration-field outputs.
+- The file contains two tab-separated columns without a header: whole-hour time in `YYYY-MM-DD HH:MM:SS` format and the learned model source strength `Q(t)`.
+- The source-strength file is written to both existing `溯源输出` destinations, and its paths are recorded as `source_strength_paths` in the export metadata embedded in `result_quality_report.json`.
+- The values remain model source-strength units rather than calibrated physical mass-flow units.
+
+### 2026-08-12 Local Deployment Adapter Implementation
+
+- Added an external `deployment/` package without restructuring the existing `pinn_source/` algorithm.
+- Implemented strict input validation for identifiers, WGS84 coordinates, `YYYY-MM-DD HH:MM:SS` times, wind `sp/dir`, station references, duplicate records, finite non-negative values, and common wind/concentration timestamps.
+- Implemented JSON conversion to the algorithm's existing `sites.xlsx`, `concentration.xlsx`, and `wind.xlsx` formats, including `TARGET_POLLUTANT` and preservation of valid zero/missing concentrations.
+- Added an isolated CPU child-process runner that forces `PINN_DEVICE=cpu`, captures stdout/stderr, keeps per-job status in `job.json`, and supports a test-only `PINN_EPOCHS` override without changing the configured production epoch count.
+- Added output assembly from the algorithm's returned source position, `源强.txt`, hourly concentration TXT files, and `result_quality_report.json` into the agreed `proto/output.json` structure.
+- Added SHA-256 manifest generation and ZIP packaging of normalized/raw inputs, algorithm outputs, logs, delivery JSON, manifest, and final job status.
+- Added `pipeline.run(..., result_root_dir=None)` so deployment jobs can keep both TXT output copies under their isolated task root; the default remains the existing configured `OUTPUT_DIR`.
+- Added three deployment adapter unit tests covering semantic validation, JSON-to-Excel conversion, output assembly, checksums, and ZIP contents; all pass.
+- Built a real historical request from `result/20260812_155955_乙烯`: 6 matched stations, 13 wind timestamps, and 77 valid concentration records. The adapter-generated Excel inputs exactly match the historical station coordinates, concentration matrix, timestamps, pollutant, wind direction, and wind speed.
+- Completed CPU subprocess end-to-end tests with shortened 1-2 epoch runs. Each produced 13 release-strength records and 13 concentration fields with 1,296 explicit longitude/latitude/concentration point objects per hour, plus a valid manifest and ZIP.
+- Verified output assembly against the existing full historical run without retraining: source coordinates, every source-strength row, and concentration-field values match their source files exactly.
+- The shortened CPU runs validate engineering integration only; their low-confidence model warnings are expected and are not an algorithm-accuracy assessment. Production runs must omit the `--epochs` override.
+
+### 2026-08-23 Deployment Work Resume Review
+
+- Reviewed the repository after an eleven-day pause. The simplified HTTP protocol in `proto/` was committed as `4716e8c`, while the local deployment adapter remains uncommitted in the working tree.
+- Confirmed the completed local adapter scope: semantic JSON validation, conversion to three algorithm Excel inputs, isolated CPU subprocess execution, hourly source-strength and concentration-field JSON assembly, result manifest, SHA-256 checksums, ZIP packaging, logs, and job-state persistence.
+- Confirmed the previous verification evidence: three adapter unit tests passed; a real 13-hour historical case round-tripped to numerically identical Excel inputs; shortened CPU end-to-end runs generated 13 source-strength rows and 13 fields of 1,296 points; output assembly matched an existing full-run source/Q/field result exactly.
+- The next planned phase is FastAPI integration, followed by CPU-only Linux Docker packaging and server-side deployment testing. Before that phase, the uncommitted adapter changes should be reviewed and committed as one coherent deployment increment.
+
+### 2026-08-23 FastAPI And CPU Docker Deployment Layer
+
+- Bonjour! Continued the approved incremental deployment plan without changing the source-inversion objective or numerical model.
+- Added an asynchronous FastAPI service with bearer authentication, 10 MB request limits, idempotent `request_id` submission, a persistent single-worker queue, status queries, `output.json` download, and ZIP result download.
+- Added gzip result callbacks with bearer authentication, configurable timeout/retries, optional fixed callback URL, and callback-host allow-listing.
+- Made job-state writes atomic and separated algorithm completion from callback delivery, so the API reports `completed` only after successful delivery.
+- Added protocol-shaped API error responses and restart recovery for queued or interrupted jobs.
+- Added a Python 3.11 x86-64 CPU Dockerfile, non-root runtime, CPU-only PyTorch installation, health check, persistent data volume, and one-worker Compose configuration.
+- Expanded automated coverage to six tests. All adapter, validation, API idempotency, artifact download, callback gzip/header, and retry tests pass.
+- Completed a real local HTTP end-to-end test through Uvicorn using a historical 13-hour request and one test epoch: status completed, one authenticated callback received, 13 hourly fields, 13 release-strength records, and a 500,265-byte ZIP downloaded.
+- Docker could not be built on this workstation because the Docker CLI is not installed. The image must still be built and smoke-tested on a Docker-capable x86-64 Linux host.
+
+### 2026-08-23 Deployment Progress Review
+
+- User requested a summary of currently implemented deployment functions, overall progress, and remaining work.
+- Current implementation covers the complete local execution chain and HTTP service chain: request validation, JSON-to-Excel conversion, isolated CPU inversion, structured result assembly, manifest/ZIP packaging, asynchronous job management, status and artifact endpoints, and authenticated gzip callbacks with retry and host restrictions.
+- Engineering integration has passed six automated tests and one historical-case HTTP end-to-end test with a shortened training run.
+- Remaining work is primarily deployment acceptance rather than core adapter development: build and smoke-test the image on x86-64 Linux, benchmark full-epoch CPU runtime and resource use, confirm unresolved client business rules and security values, add retention/cleanup and operational monitoring, and run client-server joint acceptance with full production training settings.
+
+### 2026-08-23 Deployment Readiness Clarification
+
+- Clarified that the algorithm adapter and HTTP interface are implemented and ready for deployment testing on the target server.
+- The package is not yet certified for immediate production use because the Docker image has not been built on this workstation, full-epoch CPU performance is unmeasured on the target Linux hardware, and client-side authentication, callback, retention, and acceptance settings still require confirmation.
+
+### 2026-08-23 Target Server Deployment Procedure
+
+- Recommended deploying first as a test service on the client's x86-64 Linux server: install Docker Engine and Compose, transfer a clean repository snapshot, configure API/callback secrets and callback restrictions, build the CPU image, start the Compose service, and verify health and logs.
+- After basic HTTP submission succeeds, run one shortened engineering smoke test and then one full-epoch historical acceptance case while recording runtime, memory, CPU load, callback delivery, and output consistency.
+- Production activation should follow only after configuring persistent storage, HTTPS/reverse proxy, firewall rules, backup/retention cleanup, monitoring, and client callback acceptance.
+
+### 2026-08-23 Compiled And Protected Delivery Assessment
+
+- User requested delivery without exposing the complete project and asked whether the algorithm can be packaged as an encrypted executable.
+- Confirmed that a Linux executable delivery is feasible, but local Python/PyTorch software cannot be made absolutely non-reversible; compilation, source removal, symbol stripping, access controls, and licensing can substantially raise the reverse-engineering cost.
+- Recommended a multi-stage Linux build that compiles the service/worker with Nuitka, keeps only compiled binaries and required CPU PyTorch shared libraries in the final image, and delivers a Docker image archive rather than the repository.
+- Because the current API launches `deployment.worker_entry` through `python -m`, protected packaging requires a small incremental launcher change: one compiled program should support `serve` and `worker` subcommands, with the API invoking the same binary in worker mode.
+- Recommended Nuitka standalone mode for the first protected server release. A literal one-file bundle is less suitable because the PyTorch payload is large, starts by extracting files, and is harder to diagnose. The final Docker image still gives the client one installable artifact while hiding project sources.
+- Required acceptance work includes building on compatible Linux amd64, verifying dynamic imports and PyTorch native libraries, scanning the final image for `.py` source files, and rerunning API plus historical-case end-to-end tests before image export.
+
+### 2026-08-23 Protected Image Deployment And Runtime Impact
+
+- Clarified the protected-delivery workflow: build and compile on a controlled Linux amd64 environment, run tests and source-file scans, export a versioned Docker image tar plus checksum, and give the client only the image, Compose/environment templates, and deployment instructions.
+- On the client server, deployment becomes Docker-only: load the image, configure tokens/callback/CPU threads and persistent storage, start Compose, check health, and submit an acceptance request. Python, virtual environments, project sources, and pip installation are not required on the target.
+- Expected inversion runtime is approximately unchanged because CPU PyTorch tensor operations and training epochs remain the dominant cost. Nuitka compilation affects Python orchestration but does not replace the PyTorch numerical kernels.
+- Recommended standalone-in-container packaging instead of a literal onefile binary, avoiding per-start extraction overhead. Image build/export/load takes longer and the image remains large, but those are installation/update costs rather than per-job training costs.
+- A full-epoch A/B benchmark on the same Linux hardware remains mandatory before release; compare startup, input conversion, training, packaging, peak memory, and total job time between source and compiled images.
+
+### 2026-08-23 Windows Host Linux Build Assessment
+
+- Confirmed that the local machine is Windows AMD64 and can be used to produce the protected Linux delivery by adding a Linux build environment, but a native Windows Nuitka build would produce a Windows artifact rather than the target Linux executable.
+- Checked the current workstation: no WSL distribution is installed and the Docker CLI is unavailable.
+- Recommended installing WSL2 Ubuntu first, then optionally Docker Desktop with its WSL2 Linux backend. Compilation and image construction must execute inside Linux amd64, even though they are launched from Windows.
+- Alternative build paths are a Linux virtual machine, a controlled Linux build server, or CI. The protected binary should be built against a Linux/glibc baseline no newer than the target server and tested on the actual target distribution.
+
+### 2026-08-23 Return To Source-Based Deployment
+
+- User decided not to pursue executable compilation or protected packaging and returned to direct source deployment.
+- The recommended workflow is now to prepare a clean, committed source snapshot on Windows, transfer it to the client's x86-64 Linux server, build the existing CPU Docker image on that server, configure secrets and callback restrictions, start the Compose service, and complete smoke plus full-epoch acceptance tests.
+- Local WSL, Nuitka, and Docker Desktop are no longer prerequisites. The target server needs Docker Engine and Compose; it also needs internet access during the first build or access to an internal image/package mirror.
+- Source files remain inside the resulting Docker image and can be inspected by a server administrator. Operational access control and private-repository permissions should therefore replace compilation-based source protection.
+
+### 2026-08-25 Flask Encapsulation Clarification
+
+- User asked what Flask means in a colleague's suggestion and how it encapsulates a Python algorithm.
+- Clarified that Flask is a Python HTTP web framework: it maps URLs and HTTP methods to Python functions, parses incoming JSON/files, invokes algorithm code, and serializes status/results back to the client.
+- Flask provides API/service encapsulation, not executable compilation, source-code encryption, dependency bundling, task scheduling, or containerization by itself.
+- The repository already implements the equivalent service layer with FastAPI in `deployment/api.py`, plus asynchronous job management, CPU subprocess isolation, status/download endpoints, callback delivery, validation, and Docker packaging. Replacing FastAPI with Flask would duplicate completed work without improving source protection or algorithm execution.
+- For this long-running PINN training task, the correct architecture remains asynchronous submission returning a job ID, background execution, status query, result download, and callback rather than keeping one Flask/FastAPI request open until training completes.
+
+### 2026-08-25 Class Plus uv Package Plus Web API Assessment
+
+- User asked about a proposed architecture: convert the algorithm to a class, package it with uv, and invoke it through Flask.
+- Assessed the proposal as a valid conventional Python engineering pattern, but clarified that each part solves a different concern: a class provides an invocation boundary, uv locks dependencies and can build/install a wheel, and Flask exposes HTTP routes. It does not provide encryption or a standalone executable.
+- Recommended retaining the existing functional algorithm core and introducing a thin `SourceInversionRunner` class only in the deployment layer if a stable object-oriented contract is useful. Refactoring the numerical pipeline into a stateful class would add risk without deployment benefit.
+- Recommended adopting `pyproject.toml` plus `uv.lock` for reproducible dependency installation and faster Docker builds, while retaining the already implemented FastAPI API and asynchronous job manager instead of replacing them with Flask.
+- Proposed target structure: `SourceInversionRunner` orchestrates validation, input conversion, isolated execution, result assembly, and packaging; FastAPI submits it through `JobManager`; Docker uses `uv sync --locked` or installs the built wheel. This is an incremental packaging improvement compatible with the current framework.
+
+### 2026-08-25 Confirmed Full Docker Source Deployment
+
+- User rejected the class-plus-uv-plus-Flask packaging proposal and reconfirmed full Docker deployment containing source code, the Python runtime, CPU-only PyTorch, and all dependencies, with HTTP communication.
+- This decision matches the currently implemented architecture: `deployment/api.py` exposes FastAPI endpoints, `JobManager` runs isolated asynchronous CPU jobs, the adapter converts JSON to existing algorithm inputs, and output/callback layers return structured JSON and ZIP artifacts.
+- The deployment artifact should be a versioned Docker image or exported image tar. Runtime input, job data, logs, and results remain outside the image in a persistent Docker volume; secrets and client callback settings are injected through environment variables.
+- Remaining engineering work is deployment hardening and acceptance: move example secrets to a server `.env`, add versioned build/start/smoke-test scripts, build the image on Docker-capable Linux amd64, run full-epoch CPU benchmarks, configure HTTPS/firewall/retention, and complete client callback acceptance.
+- Source code is bundled inside the image rather than installed manually on the server. It is operationally encapsulated but still inspectable by a privileged Docker/server administrator; this is accepted under the selected source-deployment model.

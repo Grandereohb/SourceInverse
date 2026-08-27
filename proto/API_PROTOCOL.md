@@ -57,6 +57,12 @@ reusing it with different data returns HTTP `409`.
 Statuses: `queued`, `validating`, `running`, `packaging`, `callback_pending`,
 `completed`, and `failed`.
 
+## Download Result
+
+- `GET /api/v1/jobs/{job_id}/output` returns the machine-readable `output.json`.
+- `GET /api/v1/jobs/{job_id}/result` returns the complete `result.zip` package.
+- Both endpoints return HTTP `409` while their artifact is not ready.
+
 ## Result Callback
 
 After training, the service sends `POST {callback_url}` with the body in
@@ -109,13 +115,16 @@ Main HTTP codes: `400` invalid JSON, `401` authentication, `409` duplicate
 conflict, `413` body too large, `422` invalid data, `429` queue full, and `500`
 or `503` service failure.
 
-## To Confirm Before Implementation
+## Deployment Configuration And Remaining Decisions
 
-1. Authentication method and callback token exchange.
-2. Fixed callback address versus per-request `callback_url`.
-3. Callback timeout, retry intervals, and maximum attempts.
-4. Minimum station count, timestamp count, and common data duration.
-5. Whether non-hourly input is rejected or resampled.
-6. Allowed concentration units and numeric precision.
-7. Whether `quality` is required in the callback.
-8. Result retention period and whether a download endpoint is needed.
+Bearer authentication, callback tokens, callback timeout/retry intervals, and
+callback host restrictions are server environment settings. The server can
+either force one callback URL or allow request URLs only for configured hosts.
+
+The following business rules still require client confirmation:
+
+1. Minimum station count, timestamp count, and common data duration.
+2. Whether non-hourly input is rejected or resampled.
+3. Allowed concentration units and numeric precision.
+4. Whether `quality` is required in the callback.
+5. Result retention period and automatic cleanup policy.

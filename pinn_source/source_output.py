@@ -13,6 +13,7 @@ from geo_utils import xy_to_latlon
 OUTPUT_FOLDER_NAME = "溯源输出"
 FIELD_FOLDER_NAME = "浓度场"
 SOURCE_LOCATION_FILENAME = "污染源点坐标.txt"
+SOURCE_STRENGTH_FILENAME = "源强.txt"
 
 
 def _hourly_timestamps(time_labels):
@@ -71,13 +72,14 @@ def export_hourly_concentration_text_outputs(
     source_lon,
     source_lat,
 ):
-    """Save integer-hour total concentration fields and the trained source point.
+    """Save hourly concentration fields, source point, and source strength.
 
     Concentration fields use the same quantity displayed by ``diffusion.gif``:
     recurrent plume concentration scaled to the observation unit plus the
     time-interpolated baseline. Each TXT row is ``longitude, latitude,
     concentration`` without a header. The source TXT contains one
-    ``longitude, latitude`` row without a header.
+    ``longitude, latitude`` row without a header. The source-strength TXT
+    contains ``time, Q`` rows without a header; Q is the model source strength.
     """
     hourly_times = _hourly_timestamps(time_labels)
     output_directories = _output_directories(output_dir, result_root_dir)
@@ -88,11 +90,20 @@ def export_hourly_concentration_text_outputs(
         )
 
     if hourly_times.empty:
+        for directory in output_directories:
+            _write_tabular_txt(
+                directory / SOURCE_STRENGTH_FILENAME,
+                {"time": [], "source_strength": []},
+            )
         return {
             "hourly_field_count": 0,
             "output_directories": [str(directory) for directory in output_directories],
             "source_paths": [
                 str(directory / SOURCE_LOCATION_FILENAME)
+                for directory in output_directories
+            ],
+            "source_strength_paths": [
+                str(directory / SOURCE_STRENGTH_FILENAME)
                 for directory in output_directories
             ],
             "field_paths": [],
@@ -116,6 +127,13 @@ def export_hourly_concentration_text_outputs(
     model.eval()
     try:
         with torch.no_grad():
+            device = next(model.parameters()).device
+            hourly_t_tensor = torch.as_tensor(
+                normalized_times,
+                dtype=torch.float32,
+                device=device,
+            ).view(-1, 1)
+            source_strength = model.Q(hourly_t_tensor).detach().cpu().numpy().reshape(-1)
             fields = recurrent_plume_fields_at_times(
                 model,
                 sigma_src=sigma_src,
@@ -126,6 +144,16 @@ def export_hourly_concentration_text_outputs(
     finally:
         if was_training:
             model.train()
+
+    source_strength_values = {
+        "time": [timestamp.strftime("%Y-%m-%d %H:%M:%S") for timestamp in hourly_times],
+        "source_strength": source_strength,
+    }
+    for directory in output_directories:
+        _write_tabular_txt(
+            directory / SOURCE_STRENGTH_FILENAME,
+            source_strength_values,
+        )
 
     x_norm = model.recurrent_x_grid.detach().cpu().numpy()
     y_norm = model.recurrent_y_grid.detach().cpu().numpy()
@@ -156,6 +184,10 @@ def export_hourly_concentration_text_outputs(
         "output_directories": [str(directory) for directory in output_directories],
         "source_paths": [
             str(directory / SOURCE_LOCATION_FILENAME) for directory in output_directories
+        ],
+        "source_strength_paths": [
+            str(directory / SOURCE_STRENGTH_FILENAME)
+            for directory in output_directories
         ],
         "field_paths": all_field_paths,
     }
