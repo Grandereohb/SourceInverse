@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "design_id": "reliability_audit_test_ood_sumitomo_v1",
+  "status": "frozen_unrun",
+  "split": "test-OOD-layout-wind",
+  "truth_model": "lagrangian_particle_receptor_stress_model",
+  "generator_script": "scripts/generate_synthetic_particle_scenario.py",
+  "retention_rule": "generate, run, retain, and report all 90 scenarios without outcome-based removal",
+  "truth_isolation_rule": "source coordinates may be read only by post-hoc evaluation after every candidate surface in the method family is frozen",
+  "success_threshold_m": 500.0,
+  "input_sets": {
+    "sumitomo_test1_3station_72h": {
+      "sites": "data/data_sumitomo/sites.xlsx",
+      "wind": "data/data_sumitomo/changjie/test1/wind.xlsx"
+    },
+    "sumitomo_test2_3station_48h": {
+      "sites": "data/data_sumitomo/sites.xlsx",
+      "wind": "data/data_sumitomo/changjie/test2/wind.xlsx"
+    },
+    "sumitomo_test3_3station_48h": {
+      "sites": "data/data_sumitomo/sites.xlsx",
+      "wind": "data/data_sumitomo/changjie/test3/wind.xlsx"
+    }
+  },
+  "input_audit": {
+    "station_count": 3,
+    "wind_row_counts": [72, 48, 48],
+    "sites_sha256": "25085004576F2BB0F4BEB1396727D9C8448BBC2DF424BABDDFB31BAC9B28F024",
+    "wind_sha256": {
+      "sumitomo_test1_3station_72h": "D01E0014D1053A904BDD85BA390671C908E860C6E4B40748CE0E91A5DE7273A6",
+      "sumitomo_test2_3station_48h": "615D82E8F615E322B2AF82CCFE970A7178636BF583A933D7ABB6D576947E9811",
+      "sumitomo_test3_3station_48h": "0B863DFCE8388021C5F4FCD52ADB0D6F97777D9D6E76D6982B102D038A2BA8C3"
+    },
+    "development_usage_search": "no references to data_sumitomo, sumitomo, or changjie were found in frozen development designs or result documentation before this protocol"
+  },
+  "factorial": {
+    "scenario_prefix": "testp_sumitomo",
+    "base_seed": 20270000,
+    "input_ids": [
+      "sumitomo_test1_3station_72h",
+      "sumitomo_test2_3station_48h",
+      "sumitomo_test3_3station_48h"
+    ],
+    "positions": [
+      {"id": "center", "fraction_x": 0.50, "fraction_y": 0.50},
+      {"id": "northeast_interior", "fraction_x": 0.75, "fraction_y": 0.75},
+      {"id": "southeast_interior", "fraction_x": 0.75, "fraction_y": 0.25},
+      {"id": "north_edge", "fraction_x": 0.50, "fraction_y": 0.95},
+      {"id": "east_edge", "fraction_x": 0.95, "fraction_y": 0.50}
+    ],
+    "physics_conditions": [
+      {
+        "id": "particle_near_matched",
+        "diffusivity": 2.0,
+        "sigma": 329.3,
+        "decay": 0.50,
+        "wind_factor": 0.25,
+        "diffusivity_along_m2s": 2.0,
+        "diffusivity_cross_m2s": 2.0,
+        "initial_sigma_along_m": 329.3,
+        "initial_sigma_cross_m": 329.3,
+        "meander_amplitude_m": 0.0
+      },
+      {
+        "id": "particle_anisotropic",
+        "diffusivity": 6.5,
+        "sigma": 195.0,
+        "decay": 0.50,
+        "wind_factor": 0.25,
+        "diffusivity_along_m2s": 12.0,
+        "diffusivity_cross_m2s": 1.0,
+        "initial_sigma_along_m": 300.0,
+        "initial_sigma_cross_m": 90.0,
+        "meander_amplitude_m": 0.0
+      },
+      {
+        "id": "particle_meandering",
+        "diffusivity": 2.0,
+        "sigma": 329.3,
+        "decay": 0.50,
+        "wind_factor": 0.25,
+        "diffusivity_along_m2s": 2.0,
+        "diffusivity_cross_m2s": 2.0,
+        "initial_sigma_along_m": 329.3,
+        "initial_sigma_cross_m": 329.3,
+        "meander_amplitude_m": 400.0
+      }
+    ],
+    "release_conditions": [
+      {"id": "constant_release", "q_shape": "constant"},
+      {"id": "double_peak_release", "q_shape": "double_peak"}
+    ],
+    "defaults": {
+      "target_peak": 100.0,
+      "noise_absolute": 0.35,
+      "noise_relative": 0.04,
+      "background_level": 3.0,
+      "station_bias_fraction": 0.10,
+      "pre_event_hours": 1.0,
+      "integration_dt_h": 0.02,
+      "sensor_kernel_sigma_m": 60.0,
+      "meander_period_h": 6.0,
+      "particles_per_release": 64,
+      "release_dt_h": 0.10
+    }
+  },
+  "preregistered_analysis": {
+    "primary_estimand": "objective-selection failure rate among all retained scenarios for which the frozen candidate oracle is within 500 m",
+    "primary_methods": [
+      "B2_dynamic_Q_gaussian_puff_profile_grid",
+      "B3_constant_Q_discrete_upwind_ADR_profile_grid"
+    ],
+    "confirmation_rule": "the one-sided 95% Wilson lower bound for the selection-failure rate exceeds 0.10 for both primary methods",
+    "secondary_methods": [
+      "B0_maximum_anomaly_station",
+      "B1_maximum_anomaly_station_fixed_upwind_shift",
+      "B2_constant_Q_gaussian_puff_profile_grid",
+      "B3_dynamic_Q_discrete_upwind_ADR_profile_grid"
+    ],
+    "secondary_endpoints": [
+      "selected localization error",
+      "oracle localization error",
+      "selection regret",
+      "candidate reachability failure rate",
+      "paired constant-versus-dynamic Q success transitions",
+      "stratification by wind window, source position, physics condition, and release condition"
+    ],
+    "multiplicity_rule": "only the two-method joint confirmation rule is primary; all method contrasts and strata are secondary with effect sizes and intervals, not binary discovery claims",
+    "resource_rule": "shared candidate transport evaluations and wall time are reported once per surface and never duplicated across Q profiles"
+  },
+  "scope_limits": [
+    "This is an OOD layout-and-wind stress test with only three fixed stations, not a representative field-population sample.",
+    "The particle generator is transparent stress truth, not FLEXPART, CFD, or operational LPDM truth.",
+    "This test can validate the reliability-audit mechanism but cannot replace controlled-release or independently verified field evidence.",
+    "No test outcome may be used to modify the methods, threshold, primary estimand, or confirmation rule. Any later change creates a new version and leaves this version reported."
+  ]
+}

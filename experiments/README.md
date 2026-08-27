@@ -20,6 +20,14 @@ The paper workflow has four stages:
    `compare_cross_method_failure_mechanisms.py`. Diagnostic sensitivity scripts
    are secondary analyses and must not be used to tune the frozen test set.
 
+The independent test protocol is
+`reliability_audit_test_ood_sumitomo_v1.json`. It is frozen but intentionally
+unrun: 90 scenarios cross three previously unused Sumitomo wind windows, five
+source positions, three particle-transport conditions, and two release
+conditions. The older `synthetic_test_matrix_v1.json` is retained only for
+provenance and is retired by `synthetic_test_matrix_v1_RETIREMENT.md` because
+its layout, wind, and seed choices later overlapped development experiments.
+
 Legacy combined baseline runners and pre-freeze event summaries were removed;
 their functionality is covered by the staged workflow above.
 

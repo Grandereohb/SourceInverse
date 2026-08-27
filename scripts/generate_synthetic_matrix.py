@@ -41,35 +41,57 @@ def _expand_factorial(factorial: dict) -> list[dict]:
     defaults = dict(factorial.get("defaults", {}))
     prefix = str(factorial.get("scenario_prefix", "factorial_puff"))
     base_seed = int(factorial.get("base_seed", 0))
+    release_conditions = factorial.get("release_conditions")
+    if release_conditions is None:
+        release_conditions = [None]
+    elif not isinstance(release_conditions, list) or not release_conditions:
+        raise ValueError("release_conditions must be a non-empty list when supplied")
     scenarios = []
     index = 0
     for input_id in factorial["input_ids"]:
         for position in factorial["positions"]:
             for physics in factorial["physics_conditions"]:
-                index += 1
-                row = dict(defaults)
-                row.update(
-                    {
-                        "scenario_id": f"{prefix}_{index:04d}",
-                        "seed": base_seed + index,
+                for release in release_conditions:
+                    index += 1
+                    design_factors = {
                         "input_id": str(input_id),
-                        "fraction_x": float(position["fraction_x"]),
-                        "fraction_y": float(position["fraction_y"]),
-                        "diffusivity": float(physics["diffusivity"]),
-                        "sigma": float(physics["sigma"]),
-                        "decay": float(physics["decay"]),
-                        "wind_factor": float(physics["wind_factor"]),
-                        "design_factors": {
-                            "input_id": str(input_id),
-                            "position_id": str(position["id"]),
-                            "physics_condition_id": str(physics["id"]),
-                        },
+                        "position_id": str(position["id"]),
+                        "physics_condition_id": str(physics["id"]),
                     }
-                )
-                for key, value in physics.items():
-                    if key not in {"id", "diffusivity", "sigma", "decay", "wind_factor"}:
-                        row[key] = value
-                scenarios.append(row)
+                    row = dict(defaults)
+                    row.update(
+                        {
+                            "scenario_id": f"{prefix}_{index:04d}",
+                            "seed": base_seed + index,
+                            "input_id": str(input_id),
+                            "fraction_x": float(position["fraction_x"]),
+                            "fraction_y": float(position["fraction_y"]),
+                            "diffusivity": float(physics["diffusivity"]),
+                            "sigma": float(physics["sigma"]),
+                            "decay": float(physics["decay"]),
+                            "wind_factor": float(physics["wind_factor"]),
+                            "design_factors": design_factors,
+                        }
+                    )
+                    for key, value in physics.items():
+                        if key not in {
+                            "id",
+                            "diffusivity",
+                            "sigma",
+                            "decay",
+                            "wind_factor",
+                        }:
+                            row[key] = value
+                    if release is not None:
+                        if not str(release.get("id", "")).strip():
+                            raise ValueError(
+                                "every release condition requires a non-empty id"
+                            )
+                        design_factors["release_condition_id"] = str(release["id"])
+                        for key, value in release.items():
+                            if key != "id":
+                                row[key] = value
+                    scenarios.append(row)
     return scenarios
 
 
