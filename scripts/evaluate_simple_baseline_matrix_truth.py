@@ -40,6 +40,7 @@ def main() -> None:
                     "input_id": entry.get("input_id"),
                     "position_id": entry.get("design_factors", {}).get("position_id"),
                     "physics_condition_id": entry.get("design_factors", {}).get("physics_condition_id"),
+                    "release_condition_id": entry.get("design_factors", {}).get("release_condition_id"),
                     "method": result["method"],
                     "localization_error_m": error,
                     "success_le_500m": error <= 500.0,

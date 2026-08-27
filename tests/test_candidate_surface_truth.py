@@ -61,6 +61,9 @@ class CandidateSurfaceTruthTests(unittest.TestCase):
                                 "scenario_id": "scenario_001",
                                 "scenario_manifest_path": "D:/old/scenario_manifest.json",
                                 "surface_path": "D:/old/candidate_surfaces.json",
+                                "design_factors": {
+                                    "release_condition_id": "double_peak_release"
+                                },
                             }
                         ]
                     }
@@ -82,6 +85,10 @@ class CandidateSurfaceTruthTests(unittest.TestCase):
                 summary["failure_categories"]["selection_failure_reachable"], 1
             )
             self.assertEqual(result["rows"][0]["selection_regret_m"], 900.0)
+            self.assertEqual(
+                result["rows"][0]["release_condition_id"],
+                "double_peak_release",
+            )
             self.assertEqual(
                 result["shared_surface_totals"]["total_forward_evaluation_count"],
                 2,

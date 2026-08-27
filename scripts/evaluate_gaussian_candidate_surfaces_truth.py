@@ -197,6 +197,9 @@ def evaluate(
                     "physics_condition_id": entry.get("design_factors", {}).get(
                         "physics_condition_id"
                     ),
+                    "release_condition_id": entry.get("design_factors", {}).get(
+                        "release_condition_id"
+                    ),
                     "method": method,
                     "candidate_count_raw": len(result["candidates"]),
                     "candidate_count_unique": len(candidates),
