@@ -1,4 +1,10 @@
-"""Post-hoc truth evaluation of frozen Gaussian-puff candidate surfaces."""
+"""Post-hoc truth evaluation of frozen source-location candidate surfaces.
+
+The original command targeted Gaussian-puff surfaces.  The saved surface
+contract is also used by the discrete-ADR baseline, so the evaluator accepts an
+explicit relocated dataset root while retaining the old command name for
+backward compatibility.
+"""
 
 from __future__ import annotations
 
@@ -37,11 +43,29 @@ def _unique_candidates(candidates: list[dict]) -> list[dict]:
     return list(by_coordinate.values())
 
 
+def _resolve_input_path(saved_path, fallback_path: Path | None, label: str) -> Path:
+    path = Path(saved_path)
+    if path.is_file():
+        return path
+    if fallback_path is not None and fallback_path.is_file():
+        return fallback_path
+    fallback_text = str(fallback_path) if fallback_path is not None else "not supplied"
+    raise FileNotFoundError(
+        f"{label} does not exist at saved path {path}; fallback={fallback_text}"
+    )
+
+
 def evaluate(
     status_path: Path,
     legacy_manifest_path: Path | None = None,
     threshold_m=500.0,
+    dataset_root: Path | None = None,
+    resource_accounting: str = "per_method",
 ) -> dict:
+    if resource_accounting not in {"per_method", "shared_per_surface"}:
+        raise ValueError(
+            "resource_accounting must be 'per_method' or 'shared_per_surface'"
+        )
     status = json.loads(status_path.read_text(encoding="utf-8"))
     legacy_by_scenario = None
     if legacy_manifest_path is not None:
@@ -50,13 +74,48 @@ def evaluate(
             row["scenario_id"]: row for row in legacy["outputs"]
         }
     rows = []
+    shared_surface_resources = []
     for entry in status["outputs"]:
-        scenario_path = Path(entry["scenario_manifest_path"])
+        scenario_id = entry["scenario_id"]
+        scenario_path = _resolve_input_path(
+            entry["scenario_manifest_path"],
+            (
+                dataset_root / scenario_id / "scenario_manifest.json"
+                if dataset_root is not None
+                else None
+            ),
+            "scenario manifest",
+        )
         scenario = json.loads(scenario_path.read_text(encoding="utf-8"))
         truth_x = float(scenario["source"]["x_m"])
         truth_y = float(scenario["source"]["y_m"])
-        surface_path = Path(entry["surface_path"])
+        surface_path = _resolve_input_path(
+            entry["surface_path"],
+            status_path.parent / scenario_id / Path(entry["surface_path"]).name,
+            "candidate surface",
+        )
         surface = json.loads(surface_path.read_text(encoding="utf-8"))
+        if resource_accounting == "shared_per_surface":
+            resource_pairs = {
+                (
+                    int(result["forward_evaluation_count"]),
+                    float(result["wall_time_s"]),
+                )
+                for result in surface["results"]
+            }
+            if len(resource_pairs) != 1:
+                raise ValueError(
+                    "shared_per_surface requires identical resource metadata "
+                    f"for every method in {surface_path}"
+                )
+            forward_count, wall_time = resource_pairs.pop()
+            shared_surface_resources.append(
+                {
+                    "scenario_id": scenario_id,
+                    "forward_evaluation_count": forward_count,
+                    "wall_time_s": wall_time,
+                }
+            )
         legacy_results = None
         if legacy_by_scenario is not None:
             legacy_path = Path(
@@ -190,14 +249,35 @@ def evaluate(
             "total_forward_evaluation_count": sum(
                 row["forward_evaluation_count"] for row in subset
             ),
+            "resource_accounting": resource_accounting,
         }
     return {
         "schema_version": 1,
-        "analysis": "truth_known_gaussian_candidate_surface_evaluation",
+        "analysis": "truth_known_candidate_surface_evaluation",
         "truth_join_timing": "truth is read only after all candidate surfaces are frozen",
         "success_threshold_m": float(threshold_m),
         "status_path": str(status_path.resolve()),
         "status_sha256": _sha256(status_path),
+        "dataset_root": str(dataset_root.resolve()) if dataset_root else None,
+        "resource_accounting": resource_accounting,
+        "shared_surface_totals": (
+            {
+                "scenario_count": len(shared_surface_resources),
+                "total_wall_time_s": sum(
+                    row["wall_time_s"] for row in shared_surface_resources
+                ),
+                "total_forward_evaluation_count": sum(
+                    row["forward_evaluation_count"]
+                    for row in shared_surface_resources
+                ),
+                "interpretation": (
+                    "transport evaluations and wall time are shared by all "
+                    "methods saved in each candidate-surface file"
+                ),
+            }
+            if resource_accounting == "shared_per_surface"
+            else None
+        ),
         "legacy_manifest_path": (
             str(legacy_manifest_path.resolve())
             if legacy_manifest_path is not None
@@ -222,11 +302,27 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--status", required=True, type=Path)
     parser.add_argument("--legacy-baseline-manifest", type=Path)
+    parser.add_argument(
+        "--dataset-root",
+        type=Path,
+        help="Current scenario root when frozen manifests contain relocated paths.",
+    )
+    parser.add_argument(
+        "--resource-accounting",
+        choices=("per_method", "shared_per_surface"),
+        default="per_method",
+    )
     parser.add_argument("--threshold-m", type=float, default=500.0)
     parser.add_argument("--output-json", required=True, type=Path)
     parser.add_argument("--output-csv", required=True, type=Path)
     args = parser.parse_args()
-    payload = evaluate(args.status, args.legacy_baseline_manifest, args.threshold_m)
+    payload = evaluate(
+        args.status,
+        args.legacy_baseline_manifest,
+        args.threshold_m,
+        dataset_root=args.dataset_root,
+        resource_accounting=args.resource_accounting,
+    )
     args.output_json.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )

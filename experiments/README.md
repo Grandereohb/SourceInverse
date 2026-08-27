@@ -22,3 +22,10 @@ The paper workflow has four stages:
 
 Legacy combined baseline runners and pre-freeze event summaries were removed;
 their functionality is covered by the staged workflow above.
+
+Despite its historical filename, `evaluate_gaussian_candidate_surfaces_truth.py`
+now evaluates any saved candidate surface that follows the common result
+contract, including discrete ADR. Use `--dataset-root` when a frozen experiment
+directory has been relocated, and use `--resource-accounting
+shared_per_surface` when multiple fitted source-strength profiles reuse the same
+transport evaluations.
