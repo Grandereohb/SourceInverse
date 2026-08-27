@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "design_id": "synthetic_development_matrix_v1",
+  "split": "development",
+  "truth_model": "independent_gaussian_puff_fine_time_integration",
+  "retention_rule": "retain and report every generated scenario, including unresponsive or non-identifiable cases",
+  "scenarios": [
+    {"scenario_id": "dev_puff_0002", "seed": 20260826, "fraction_x": 0.30, "fraction_y": 0.30, "q_shape": "constant", "target_peak": 100.0, "diffusivity": 4.0, "sigma": 80.0, "decay": 0.02, "wind_factor": 0.20, "noise_absolute": 0.25, "noise_relative": 0.03},
+    {"scenario_id": "dev_puff_0003", "seed": 20260827, "fraction_x": 0.70, "fraction_y": 0.30, "q_shape": "step", "target_peak": 120.0, "diffusivity": 8.0, "sigma": 120.0, "decay": 0.08, "wind_factor": 0.35, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "dev_puff_0004", "seed": 20260828, "fraction_x": 0.30, "fraction_y": 0.70, "q_shape": "double_peak", "target_peak": 120.0, "diffusivity": 16.0, "sigma": 200.0, "decay": 0.15, "wind_factor": 0.50, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "dev_puff_0005", "seed": 20260829, "fraction_x": 0.70, "fraction_y": 0.70, "q_shape": "single_pulse", "target_peak": 100.0, "diffusivity": 4.0, "sigma": 160.0, "decay": 0.02, "wind_factor": 0.50, "noise_absolute": 0.30, "noise_relative": 0.04},
+    {"scenario_id": "dev_puff_0006", "seed": 20260830, "fraction_x": 0.50, "fraction_y": 0.50, "q_shape": "constant", "target_peak": 120.0, "diffusivity": 12.0, "sigma": 100.0, "decay": 0.20, "wind_factor": 0.20, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "dev_puff_0007", "seed": 20260831, "fraction_x": 0.15, "fraction_y": 0.50, "q_shape": "step", "target_peak": 100.0, "diffusivity": 6.0, "sigma": 80.0, "decay": 0.08, "wind_factor": 0.35, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "dev_puff_0008", "seed": 20260832, "fraction_x": 0.85, "fraction_y": 0.50, "q_shape": "double_peak", "target_peak": 120.0, "diffusivity": 10.0, "sigma": 180.0, "decay": 0.05, "wind_factor": 0.35, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "dev_puff_0009", "seed": 20260833, "fraction_x": 0.50, "fraction_y": 0.15, "q_shape": "single_pulse", "target_peak": 100.0, "diffusivity": 16.0, "sigma": 120.0, "decay": 0.15, "wind_factor": 0.20, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "dev_puff_0010", "seed": 20260834, "fraction_x": 0.50, "fraction_y": 0.85, "q_shape": "constant", "target_peak": 100.0, "diffusivity": 4.0, "sigma": 200.0, "decay": 0.02, "wind_factor": 0.50, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "dev_puff_0011", "seed": 20260835, "fraction_x": 0.20, "fraction_y": 0.20, "q_shape": "double_peak", "target_peak": 120.0, "diffusivity": 8.0, "sigma": 100.0, "decay": 0.20, "wind_factor": 0.35, "noise_absolute": 0.70, "noise_relative": 0.08},
+    {"scenario_id": "dev_puff_0012", "seed": 20260836, "fraction_x": 0.80, "fraction_y": 0.80, "q_shape": "step", "target_peak": 60.0, "diffusivity": 12.0, "sigma": 160.0, "decay": 0.08, "wind_factor": 0.35, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "dev_puff_0013", "seed": 20260837, "fraction_x": 0.50, "fraction_y": 0.50, "q_shape": "single_pulse", "target_peak": 120.0, "diffusivity": 8.0, "sigma": 120.0, "decay": 0.08, "wind_factor": 0.35, "noise_absolute": 0.35, "noise_relative": 0.04}
+  ],
+  "notes": [
+    "The matrix was declared after dev_puff_0001 and remains development-only.",
+    "It spans source position, release shape, diffusion, source width, decay, wind coupling, signal strength, and noise.",
+    "Calibration and test matrices must be versioned separately and use disjoint wind windows."
+  ]
+}

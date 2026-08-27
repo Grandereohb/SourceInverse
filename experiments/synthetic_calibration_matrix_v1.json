@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "design_id": "synthetic_calibration_matrix_v1",
+  "split": "calibration",
+  "truth_model": "independent_gaussian_puff_fine_time_integration",
+  "retention_rule": "retain and report every generated scenario; use this split only to select diagnostics and thresholds",
+  "scenarios": [
+    {"scenario_id": "cal_puff_0001", "seed": 20260901, "fraction_x": 0.25, "fraction_y": 0.25, "q_shape": "constant", "target_peak": 90.0, "diffusivity": 3.0, "sigma": 70.0, "decay": 0.01, "wind_factor": 0.18, "noise_absolute": 0.30, "noise_relative": 0.03},
+    {"scenario_id": "cal_puff_0002", "seed": 20260902, "fraction_x": 0.50, "fraction_y": 0.25, "q_shape": "step", "target_peak": 110.0, "diffusivity": 7.0, "sigma": 130.0, "decay": 0.10, "wind_factor": 0.32, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "cal_puff_0003", "seed": 20260903, "fraction_x": 0.75, "fraction_y": 0.25, "q_shape": "double_peak", "target_peak": 130.0, "diffusivity": 14.0, "sigma": 220.0, "decay": 0.25, "wind_factor": 0.48, "noise_absolute": 0.40, "noise_relative": 0.05},
+    {"scenario_id": "cal_puff_0004", "seed": 20260904, "fraction_x": 0.25, "fraction_y": 0.50, "q_shape": "single_pulse", "target_peak": 70.0, "diffusivity": 22.0, "sigma": 130.0, "decay": 0.10, "wind_factor": 0.18, "noise_absolute": 0.45, "noise_relative": 0.05},
+    {"scenario_id": "cal_puff_0005", "seed": 20260905, "fraction_x": 0.50, "fraction_y": 0.50, "q_shape": "constant", "target_peak": 130.0, "diffusivity": 14.0, "sigma": 70.0, "decay": 0.25, "wind_factor": 0.32, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "cal_puff_0006", "seed": 20260906, "fraction_x": 0.75, "fraction_y": 0.50, "q_shape": "step", "target_peak": 90.0, "diffusivity": 3.0, "sigma": 220.0, "decay": 0.01, "wind_factor": 0.48, "noise_absolute": 0.30, "noise_relative": 0.03},
+    {"scenario_id": "cal_puff_0007", "seed": 20260907, "fraction_x": 0.25, "fraction_y": 0.75, "q_shape": "double_peak", "target_peak": 110.0, "diffusivity": 7.0, "sigma": 130.0, "decay": 0.25, "wind_factor": 0.18, "noise_absolute": 0.70, "noise_relative": 0.08},
+    {"scenario_id": "cal_puff_0008", "seed": 20260908, "fraction_x": 0.50, "fraction_y": 0.75, "q_shape": "single_pulse", "target_peak": 130.0, "diffusivity": 22.0, "sigma": 70.0, "decay": 0.10, "wind_factor": 0.32, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "cal_puff_0009", "seed": 20260909, "fraction_x": 0.75, "fraction_y": 0.75, "q_shape": "constant", "target_peak": 70.0, "diffusivity": 7.0, "sigma": 220.0, "decay": 0.01, "wind_factor": 0.48, "noise_absolute": 0.45, "noise_relative": 0.06},
+    {"scenario_id": "cal_puff_0010", "seed": 20260910, "fraction_x": 0.10, "fraction_y": 0.50, "q_shape": "step", "target_peak": 110.0, "diffusivity": 14.0, "sigma": 130.0, "decay": 0.10, "wind_factor": 0.32, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "cal_puff_0011", "seed": 20260911, "fraction_x": 0.90, "fraction_y": 0.50, "q_shape": "double_peak", "target_peak": 90.0, "diffusivity": 22.0, "sigma": 220.0, "decay": 0.25, "wind_factor": 0.18, "noise_absolute": 0.40, "noise_relative": 0.05},
+    {"scenario_id": "cal_puff_0012", "seed": 20260912, "fraction_x": 0.50, "fraction_y": 0.90, "q_shape": "single_pulse", "target_peak": 130.0, "diffusivity": 3.0, "sigma": 70.0, "decay": 0.01, "wind_factor": 0.48, "noise_absolute": 0.35, "noise_relative": 0.04}
+  ],
+  "notes": [
+    "Uses the JJJ 12-station geometry and its 13-hour wind sequence, disjoint from development.",
+    "May be used to select source parameterization, diagnostic features, and selective-output thresholds.",
+    "Must not be reported as untouched test performance."
+  ]
+}

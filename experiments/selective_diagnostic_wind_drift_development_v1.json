@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "config_id": "selective_diagnostic_wind_drift_development_v1",
+  "stage": "development_transport_drift_falsification",
+  "failure_threshold_m": 500.0,
+  "truth_usage": "truth is used only after all wind-scale inversions to evaluate the predeclared drift ranking",
+  "retention_rule": "retain every scenario and every tied score group",
+  "prohibitions": [
+    "do not reverse feature directions after viewing localization truth",
+    "do not set a final point-acceptance threshold on development",
+    "do not interpret perturbation drift as a confidence region"
+  ],
+  "features": [
+    {
+      "name": "wind_scale_max_pairwise_source_drift_m",
+      "direction": "ascending"
+    },
+    {
+      "name": "wind_scale_max_baseline_source_drift_m",
+      "direction": "ascending"
+    }
+  ]
+}

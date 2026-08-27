@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "design_id": "exploratory_physics_sensitivity_single_start_v1",
+  "coordinate_system": "pipeline_heuristic",
+  "selection_rule": "single run; no best-run selection",
+  "random_seed": 0,
+  "starts": [
+    {
+      "id": "heuristic",
+      "mode": "pipeline_heuristic"
+    }
+  ],
+  "notes": [
+    "This design was created during development after observing default-physics bias.",
+    "It is an explicitly exploratory oracle-physics sensitivity, not a preregistered method result.",
+    "It must not be included in frozen calibration or test performance tables."
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "experiment_id": "local_profile_mechanism_pilot_development_v1",
+  "purpose": "Development-only mechanism pilot before any calibration or test access",
+  "truth_use": "Source truth was used only to choose four contrasting development mechanisms; each event-specific candidate design was generated without reading truth.",
+  "scenario_selection": [
+    {
+      "scenario_id": "dev_puff_0009",
+      "mechanism": "candidate_reachability_failure"
+    },
+    {
+      "scenario_id": "dev_puff_0010",
+      "mechanism": "selection_failure_reachable"
+    },
+    {
+      "scenario_id": "dev_puff_0012",
+      "mechanism": "truth_coincident_start_drifted_under_shared_objective"
+    },
+    {
+      "scenario_id": "dev_puff_0013",
+      "mechanism": "selected_success"
+    }
+  ],
+  "profile_design": {
+    "center": "minimum-best_raw_loss endpoint from the frozen six-start inversion",
+    "radial_offsets_m": [250, 500],
+    "directions": ["e", "ne", "n", "nw", "w", "sw", "s", "se"],
+    "include_multistart_endpoints": true,
+    "nuisance_seed_offsets_stage_1": [0],
+    "nuisance_initialization": "warm-start all non-location model state from the frozen selected multistart checkpoint, then reset and lock source coordinates at each candidate",
+    "fixed_source_position": true,
+    "q_mode": "smooth_time",
+    "epochs": 500,
+    "solver": "production",
+    "random_seed": 0,
+    "wind_scale": 0.25,
+    "decay_per_hour": 0.5,
+    "d_min_m2s": 1.0,
+    "sigma_src_norm": 0.05,
+    "wind_vector_smoothing": "enabled"
+  },
+  "generated_designs": [
+    {
+      "scenario_id": "dev_puff_0009",
+      "path": "experiments/generated/local_profile_dev_puff_0009_development_v1.json",
+      "sha256": "9B383B68EDE877EDC92F083CCCE9B1D9C351481492DB7BFE511DC79A4A62E2E7",
+      "candidate_count": 22
+    },
+    {
+      "scenario_id": "dev_puff_0010",
+      "path": "experiments/generated/local_profile_dev_puff_0010_development_v1.json",
+      "sha256": "CCAD2C8509E42661B72DFE5C73F63734E7E6E6B0BEAAE5268D131845CE969D10",
+      "candidate_count": 22
+    },
+    {
+      "scenario_id": "dev_puff_0012",
+      "path": "experiments/generated/local_profile_dev_puff_0012_development_v1.json",
+      "sha256": "599AF7B53CFCE5A3A3BBCC8E47C70653C8482831A2ADBD6DD108B82FA82C5C73",
+      "candidate_count": 22
+    },
+    {
+      "scenario_id": "dev_puff_0013",
+      "path": "experiments/generated/local_profile_dev_puff_0013_development_v1.json",
+      "sha256": "89C588618E0D4FE53C97539C8FC25BCCEBB1375BB70067333F3C0F7BBE05D498",
+      "candidate_count": 22
+    }
+  ],
+  "stage_1_run_count": 88,
+  "promotion_rule": "Do not enter calibration. First require a prespecified profile-geometry summary to rank the selected-success case as safer than both the reachability-failure and selection-failure cases without using concentration fit alone. If this fails, retain the pilot as a negative result and redesign or drop the selective claim before expanding nuisance seeds or all development scenarios.",
+  "prohibited_interpretations": [
+    "delta profile loss is not a posterior probability",
+    "the four development cases do not estimate generalization performance",
+    "no threshold may be transferred to calibration or test from this pilot alone"
+  ]
+}

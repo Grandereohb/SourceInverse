@@ -357,11 +357,6 @@ def recurrent_plume_fields(model, sigma_src):
     source = _source_grid(
         model, t_values[0], x_grid, y_grid, x_mesh, y_mesh, sigma_src
     )
-    if t_values.numel() == 1:
-        field = field + source_scale * model.Q(t_values[0].view(1, 1)).view(()) * source
-        fields.append(field)
-        return torch.stack(fields, dim=0)
-
     integration_times = model.recurrent_integration_times.to(
         device=model.xs.device, dtype=model.xs.dtype
     )
@@ -369,11 +364,14 @@ def recurrent_plume_fields(model, sigma_src):
 
     initial_release_fraction = max(float(RECURRENT_INITIAL_RELEASE_FRACTION), 0.0)
     if initial_release_fraction > 0.0:
+        default_initial_release_dt = (
+            float(t_values[1] - t_values[0]) if t_values.numel() > 1 else 1.0
+        )
         first_dt_total = torch.as_tensor(
             getattr(
                 model,
                 "recurrent_initial_release_dt",
-                float(t_values[1] - t_values[0]),
+                default_initial_release_dt,
             ),
             dtype=model.xs.dtype,
             device=model.xs.device,
@@ -389,6 +387,9 @@ def recurrent_plume_fields(model, sigma_src):
         )
 
     fields.append(field)
+    if t_values.numel() == 1:
+        return torch.stack(fields, dim=0)
+
     for i in range(t_values.numel() - 1):
         t_i = t_values[i]
         dt_total = torch.clamp(t_values[i + 1] - t_i, min=1e-6)
@@ -425,6 +426,19 @@ def recurrent_plume_fields(model, sigma_src):
         fields.append(field)
 
     return torch.stack(fields, dim=0)
+
+
+def recurrent_plume_fields_selected(model, sigma_src):
+    solver = str(getattr(model, "recurrent_solver", "production")).strip().lower()
+    if solver == "production":
+        return recurrent_plume_fields(model, sigma_src)
+    if solver == "characteristic":
+        from research_recurrent import recurrent_plume_fields_characteristic
+
+        return recurrent_plume_fields_characteristic(model, sigma_src)
+    raise ValueError(
+        f"Unknown recurrent solver {solver!r}; expected 'production' or 'characteristic'."
+    )
 
 
 _RECURRENT_CONTEXT_ATTRIBUTES = (
@@ -476,7 +490,7 @@ def recurrent_plume_fields_at_times(model, sigma_src, t_values, u_values, v_valu
             nx=int(saved_context["recurrent_x_grid"].numel()),
             ny=int(saved_context["recurrent_y_grid"].numel()),
         )
-        return recurrent_plume_fields(model, sigma_src)
+        return recurrent_plume_fields_selected(model, sigma_src)
     finally:
         for name in _RECURRENT_CONTEXT_ATTRIBUTES:
             if name in saved_context:
@@ -486,7 +500,7 @@ def recurrent_plume_fields_at_times(model, sigma_src, t_values, u_values, v_valu
 
 
 def recurrent_plume_value(model, xyt, sigma_src):
-    fields = recurrent_plume_fields(model, sigma_src)
+    fields = recurrent_plume_fields_selected(model, sigma_src)
     x_grid = model.recurrent_x_grid.to(device=xyt.device, dtype=xyt.dtype)
     y_grid = model.recurrent_y_grid.to(device=xyt.device, dtype=xyt.dtype)
     t_grid = model.recurrent_times.to(device=xyt.device, dtype=xyt.dtype)

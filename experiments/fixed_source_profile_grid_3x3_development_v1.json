@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "design_id": "fixed_source_profile_grid_3x3_development_v1",
+  "purpose": "Development-only end-to-end smoke test for objective-consistent fixed-source nuisance reoptimization",
+  "selection_rule": "minimum original best_raw_loss across fixed candidates; no probability interpretation",
+  "truth_isolation": "candidate fractions use only the declared source-domain geometry and do not read source truth",
+  "starts": [
+    {"id": "f20_f20", "mode": "domain_fraction", "fraction_x": 0.2, "fraction_y": 0.2},
+    {"id": "f50_f20", "mode": "domain_fraction", "fraction_x": 0.5, "fraction_y": 0.2},
+    {"id": "f80_f20", "mode": "domain_fraction", "fraction_x": 0.8, "fraction_y": 0.2},
+    {"id": "f20_f50", "mode": "domain_fraction", "fraction_x": 0.2, "fraction_y": 0.5},
+    {"id": "f50_f50", "mode": "domain_fraction", "fraction_x": 0.5, "fraction_y": 0.5},
+    {"id": "f80_f50", "mode": "domain_fraction", "fraction_x": 0.8, "fraction_y": 0.5},
+    {"id": "f20_f80", "mode": "domain_fraction", "fraction_x": 0.2, "fraction_y": 0.8},
+    {"id": "f50_f80", "mode": "domain_fraction", "fraction_x": 0.5, "fraction_y": 0.8},
+    {"id": "f80_f80", "mode": "domain_fraction", "fraction_x": 0.8, "fraction_y": 0.8}
+  ]
+}

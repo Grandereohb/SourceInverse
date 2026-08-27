@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "design_id": "development_multistart_v1",
+  "coordinate_system": "fraction_of_declared_source_domain",
+  "source_domain_definition": "station envelope expanded by SOURCE_POSITION_PAD_M on each side",
+  "selection_rule": "minimum best_raw_loss within each recurrent solver",
+  "random_seed": 0,
+  "starts": [
+    {
+      "id": "heuristic",
+      "mode": "pipeline_heuristic"
+    },
+    {
+      "id": "center",
+      "mode": "domain_fraction",
+      "fraction_x": 0.5,
+      "fraction_y": 0.5
+    },
+    {
+      "id": "southwest",
+      "mode": "domain_fraction",
+      "fraction_x": 0.2,
+      "fraction_y": 0.2
+    },
+    {
+      "id": "northwest",
+      "mode": "domain_fraction",
+      "fraction_x": 0.2,
+      "fraction_y": 0.8
+    },
+    {
+      "id": "southeast",
+      "mode": "domain_fraction",
+      "fraction_x": 0.8,
+      "fraction_y": 0.2
+    },
+    {
+      "id": "northeast",
+      "mode": "domain_fraction",
+      "fraction_x": 0.8,
+      "fraction_y": 0.8
+    }
+  ],
+  "notes": [
+    "The design contains one data-dependent heuristic start and five predeclared geometric starts.",
+    "No source-truth coordinate is read or used by the execution runner.",
+    "This is a development protocol; a later untouched test protocol must be versioned separately."
+  ]
+}

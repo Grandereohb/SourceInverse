@@ -1,0 +1,431 @@
+{
+  "schema_version": 1,
+  "design_id": "local_profile_dev_puff_0013_v1",
+  "purpose": "Development-only truth-blind objective-consistent local source profile",
+  "selection_rule": "minimum original best_raw_loss across nuisance starts at each fixed candidate",
+  "truth_isolation": "generator reads only multistart experiment_plan.json and run_manifest.json files; it does not read scenario truth",
+  "profile_geometry": {
+    "center_rule": "minimum best_raw_loss multistart endpoint",
+    "radii_m": [
+      250.0,
+      500.0
+    ],
+    "directions": [
+      "e",
+      "ne",
+      "n",
+      "nw",
+      "w",
+      "sw",
+      "s",
+      "se"
+    ],
+    "include_multistart_endpoints": true,
+    "deduplication_tolerance_m": 1.0
+  },
+  "provenance": {
+    "multistart_root": "C:\\Document\\phd\\SourceInverse\\论文\\synthetic_development_matrix_v1\\analysis\\inversion_multistart_smooth_time_v1\\dev_puff_0013",
+    "experiment_plan_path": "C:\\Document\\phd\\SourceInverse\\论文\\synthetic_development_matrix_v1\\analysis\\inversion_multistart_smooth_time_v1\\dev_puff_0013\\experiment_plan.json",
+    "experiment_plan_sha256": "96A7F4E656EDD40D7B351E6A40E6B1A68596498FDA7BE379E78F8AA4297B6B01",
+    "selected_start_id": "heuristic",
+    "selected_best_raw_loss": 32.22852325439453,
+    "selected_checkpoint_path": "C:\\Document\\phd\\SourceInverse\\论文\\synthetic_development_matrix_v1\\analysis\\inversion_multistart_smooth_time_v1\\dev_puff_0013\\runs\\production\\20260826_102504_development_multistart_v1_production\\run_heuristic\\best_model_state.pt",
+    "selected_checkpoint_sha256": "B09C908E530A44BF601831248D30FEDBBD7C349AD7BCD7338189C859E9A6A3E2",
+    "input_run_manifests": [
+      {
+        "start_id": "heuristic",
+        "x_m": 318.2618297958253,
+        "y_m": 48.79905280478247,
+        "best_raw_loss": 32.22852325439453,
+        "checkpoint_path": "C:\\Document\\phd\\SourceInverse\\论文\\synthetic_development_matrix_v1\\analysis\\inversion_multistart_smooth_time_v1\\dev_puff_0013\\runs\\production\\20260826_102504_development_multistart_v1_production\\run_heuristic\\best_model_state.pt",
+        "checkpoint_sha256": "B09C908E530A44BF601831248D30FEDBBD7C349AD7BCD7338189C859E9A6A3E2",
+        "manifest_path": "C:\\Document\\phd\\SourceInverse\\论文\\synthetic_development_matrix_v1\\analysis\\inversion_multistart_smooth_time_v1\\dev_puff_0013\\runs\\production\\20260826_102504_development_multistart_v1_production\\run_heuristic\\run_manifest.json",
+        "manifest_sha256": "C00E9D4F732F567532FB600EC97725078E933D9FDC569A90DEDFFD3F0DB83C32"
+      },
+      {
+        "start_id": "center",
+        "x_m": -100.32463191180963,
+        "y_m": -21.69691108324689,
+        "best_raw_loss": 35.003135681152344,
+        "checkpoint_path": "C:\\Document\\phd\\SourceInverse\\论文\\synthetic_development_matrix_v1\\analysis\\inversion_multistart_smooth_time_v1\\dev_puff_0013\\runs\\production\\20260826_102711_development_multistart_v1_production\\run_center\\best_model_state.pt",
+        "checkpoint_sha256": "908E5167D1B32FA37BCFF4C425CC94DBBEDE563DEE040DCB9E925B41CAD3FFFC",
+        "manifest_path": "C:\\Document\\phd\\SourceInverse\\论文\\synthetic_development_matrix_v1\\analysis\\inversion_multistart_smooth_time_v1\\dev_puff_0013\\runs\\production\\20260826_102711_development_multistart_v1_production\\run_center\\run_manifest.json",
+        "manifest_sha256": "2F2BB75C2D9C2D4C9B9B1AC8EBB02C8B1D4E950D38D9CEB2322C790DFF944FF7"
+      },
+      {
+        "start_id": "southwest",
+        "x_m": -1379.8577243848358,
+        "y_m": -2052.6330125436375,
+        "best_raw_loss": 98.60615539550781,
+        "checkpoint_path": "C:\\Document\\phd\\SourceInverse\\论文\\synthetic_development_matrix_v1\\analysis\\inversion_multistart_smooth_time_v1\\dev_puff_0013\\runs\\production\\20260826_102917_development_multistart_v1_production\\run_southwest\\best_model_state.pt",
+        "checkpoint_sha256": "721D14CD06550E74903D632F2229FD39F7E9A89BE470E4F89991BF5BE39578EB",
+        "manifest_path": "C:\\Document\\phd\\SourceInverse\\论文\\synthetic_development_matrix_v1\\analysis\\inversion_multistart_smooth_time_v1\\dev_puff_0013\\runs\\production\\20260826_102917_development_multistart_v1_production\\run_southwest\\run_manifest.json",
+        "manifest_sha256": "3AE8665E153440D0D66197310B5021A5295EC74E7CB8D8E9F5325A86C483EE92"
+      },
+      {
+        "start_id": "northwest",
+        "x_m": -2167.5071896186964,
+        "y_m": 1848.143753081919,
+        "best_raw_loss": 98.7580795288086,
+        "checkpoint_path": "C:\\Document\\phd\\SourceInverse\\论文\\synthetic_development_matrix_v1\\analysis\\inversion_multistart_smooth_time_v1\\dev_puff_0013\\runs\\production\\20260826_103122_development_multistart_v1_production\\run_northwest\\best_model_state.pt",
+        "checkpoint_sha256": "AA2874D6CA2B2C882680F4A0F70E22A6E5A8C1BBE1BAEDE91D1184F5ACFFF675",
+        "manifest_path": "C:\\Document\\phd\\SourceInverse\\论文\\synthetic_development_matrix_v1\\analysis\\inversion_multistart_smooth_time_v1\\dev_puff_0013\\runs\\production\\20260826_103122_development_multistart_v1_production\\run_northwest\\run_manifest.json",
+        "manifest_sha256": "3C40A6075C4BBFA8CB03AD3B679158895A764373984F701F5D03666795F057C6"
+      },
+      {
+        "start_id": "southeast",
+        "x_m": 1971.2859809277518,
+        "y_m": -1621.3764232811232,
+        "best_raw_loss": 98.75119018554688,
+        "checkpoint_path": "C:\\Document\\phd\\SourceInverse\\论文\\synthetic_development_matrix_v1\\analysis\\inversion_multistart_smooth_time_v1\\dev_puff_0013\\runs\\production\\20260826_103324_development_multistart_v1_production\\run_southeast\\best_model_state.pt",
+        "checkpoint_sha256": "63B289668BC16FC310AA68FB946E5CFCE53060A92F52AA286E4A5C1BEFB21F50",
+        "manifest_path": "C:\\Document\\phd\\SourceInverse\\论文\\synthetic_development_matrix_v1\\analysis\\inversion_multistart_smooth_time_v1\\dev_puff_0013\\runs\\production\\20260826_103324_development_multistart_v1_production\\run_southeast\\run_manifest.json",
+        "manifest_sha256": "DEEA0F8E0ABF7F9F7B71B4E245E48853F40A98921501347B6578B6495E367B41"
+      },
+      {
+        "start_id": "northeast",
+        "x_m": 912.1735586105949,
+        "y_m": 360.5602002042451,
+        "best_raw_loss": 41.44953918457031,
+        "checkpoint_path": "C:\\Document\\phd\\SourceInverse\\论文\\synthetic_development_matrix_v1\\analysis\\inversion_multistart_smooth_time_v1\\dev_puff_0013\\runs\\production\\20260826_103520_development_multistart_v1_production\\run_northeast\\best_model_state.pt",
+        "checkpoint_sha256": "24B122F0C383D2352F07C0B2833CD0E3001B9B721F590AC4D4B78A642324E12F",
+        "manifest_path": "C:\\Document\\phd\\SourceInverse\\论文\\synthetic_development_matrix_v1\\analysis\\inversion_multistart_smooth_time_v1\\dev_puff_0013\\runs\\production\\20260826_103520_development_multistart_v1_production\\run_northeast\\run_manifest.json",
+        "manifest_sha256": "63A88F5DFA875705EC78D30998554308143A2DA039217020B4F4F644BB698B73"
+      }
+    ]
+  },
+  "resolved_candidates_m": [
+    {
+      "candidate_id": "selected",
+      "origin": "selected_multistart::heuristic",
+      "x_m": 318.2618297958253,
+      "y_m": 48.79905280478247
+    },
+    {
+      "candidate_id": "r0250_e",
+      "origin": "selected_centered_radial_profile",
+      "x_m": 568.2618297958253,
+      "y_m": 48.79905280478247
+    },
+    {
+      "candidate_id": "r0250_ne",
+      "origin": "selected_centered_radial_profile",
+      "x_m": 495.0385250924622,
+      "y_m": 225.57574810141935
+    },
+    {
+      "candidate_id": "r0250_n",
+      "origin": "selected_centered_radial_profile",
+      "x_m": 318.2618297958253,
+      "y_m": 298.7990528047825
+    },
+    {
+      "candidate_id": "r0250_nw",
+      "origin": "selected_centered_radial_profile",
+      "x_m": 141.4851344991884,
+      "y_m": 225.57574810141935
+    },
+    {
+      "candidate_id": "r0250_w",
+      "origin": "selected_centered_radial_profile",
+      "x_m": 68.26182979582529,
+      "y_m": 48.79905280478247
+    },
+    {
+      "candidate_id": "r0250_sw",
+      "origin": "selected_centered_radial_profile",
+      "x_m": 141.4851344991884,
+      "y_m": -127.97764249185443
+    },
+    {
+      "candidate_id": "r0250_s",
+      "origin": "selected_centered_radial_profile",
+      "x_m": 318.2618297958253,
+      "y_m": -201.20094719521754
+    },
+    {
+      "candidate_id": "r0250_se",
+      "origin": "selected_centered_radial_profile",
+      "x_m": 495.0385250924622,
+      "y_m": -127.97764249185443
+    },
+    {
+      "candidate_id": "r0500_e",
+      "origin": "selected_centered_radial_profile",
+      "x_m": 818.2618297958253,
+      "y_m": 48.79905280478247
+    },
+    {
+      "candidate_id": "r0500_ne",
+      "origin": "selected_centered_radial_profile",
+      "x_m": 671.8152203890991,
+      "y_m": 402.35244339805627
+    },
+    {
+      "candidate_id": "r0500_n",
+      "origin": "selected_centered_radial_profile",
+      "x_m": 318.2618297958253,
+      "y_m": 548.7990528047825
+    },
+    {
+      "candidate_id": "r0500_nw",
+      "origin": "selected_centered_radial_profile",
+      "x_m": -35.29156079744848,
+      "y_m": 402.35244339805627
+    },
+    {
+      "candidate_id": "r0500_w",
+      "origin": "selected_centered_radial_profile",
+      "x_m": -181.7381702041747,
+      "y_m": 48.79905280478247
+    },
+    {
+      "candidate_id": "r0500_sw",
+      "origin": "selected_centered_radial_profile",
+      "x_m": -35.29156079744848,
+      "y_m": -304.7543377884913
+    },
+    {
+      "candidate_id": "r0500_s",
+      "origin": "selected_centered_radial_profile",
+      "x_m": 318.2618297958253,
+      "y_m": -451.2009471952175
+    },
+    {
+      "candidate_id": "r0500_se",
+      "origin": "selected_centered_radial_profile",
+      "x_m": 671.8152203890991,
+      "y_m": -304.7543377884913
+    },
+    {
+      "candidate_id": "basin_center",
+      "origin": "multistart_endpoint::center",
+      "x_m": -100.32463191180963,
+      "y_m": -21.69691108324689
+    },
+    {
+      "candidate_id": "basin_northeast",
+      "origin": "multistart_endpoint::northeast",
+      "x_m": 912.1735586105949,
+      "y_m": 360.5602002042451
+    },
+    {
+      "candidate_id": "basin_northwest",
+      "origin": "multistart_endpoint::northwest",
+      "x_m": -2167.5071896186964,
+      "y_m": 1848.143753081919
+    },
+    {
+      "candidate_id": "basin_southeast",
+      "origin": "multistart_endpoint::southeast",
+      "x_m": 1971.2859809277518,
+      "y_m": -1621.3764232811232
+    },
+    {
+      "candidate_id": "basin_southwest",
+      "origin": "multistart_endpoint::southwest",
+      "x_m": -1379.8577243848358,
+      "y_m": -2052.6330125436375
+    }
+  ],
+  "starts": [
+    {
+      "id": "selected__n0",
+      "candidate_id": "selected",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.5299196522682905,
+      "fraction_y": 0.4979254771836297
+    },
+    {
+      "id": "r0250_e__n0",
+      "candidate_id": "r0250_e",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.5672650542651256,
+      "fraction_y": 0.4979254771836297
+    },
+    {
+      "id": "r0250_ne__n0",
+      "candidate_id": "r0250_ne",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.5563268392663903,
+      "fraction_y": 0.532505612599262
+    },
+    {
+      "id": "r0250_n__n0",
+      "candidate_id": "r0250_n",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.5299196522682905,
+      "fraction_y": 0.546829173677115
+    },
+    {
+      "id": "r0250_nw__n0",
+      "candidate_id": "r0250_nw",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.5035124652701907,
+      "fraction_y": 0.532505612599262
+    },
+    {
+      "id": "r0250_w__n0",
+      "candidate_id": "r0250_w",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.4925742502714553,
+      "fraction_y": 0.4979254771836297
+    },
+    {
+      "id": "r0250_sw__n0",
+      "candidate_id": "r0250_sw",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.5035124652701907,
+      "fraction_y": 0.46334534176799735
+    },
+    {
+      "id": "r0250_s__n0",
+      "candidate_id": "r0250_s",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.5299196522682905,
+      "fraction_y": 0.44902178069014437
+    },
+    {
+      "id": "r0250_se__n0",
+      "candidate_id": "r0250_se",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.5563268392663903,
+      "fraction_y": 0.46334534176799735
+    },
+    {
+      "id": "r0500_e__n0",
+      "candidate_id": "r0500_e",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.6046104562619609,
+      "fraction_y": 0.4979254771836297
+    },
+    {
+      "id": "r0500_ne__n0",
+      "candidate_id": "r0500_ne",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.5827340262644901,
+      "fraction_y": 0.5670857480148943
+    },
+    {
+      "id": "r0500_n__n0",
+      "candidate_id": "r0500_n",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.5299196522682905,
+      "fraction_y": 0.5957328701706004
+    },
+    {
+      "id": "r0500_nw__n0",
+      "candidate_id": "r0500_nw",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.4771052782720909,
+      "fraction_y": 0.5670857480148943
+    },
+    {
+      "id": "r0500_w__n0",
+      "candidate_id": "r0500_w",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.4552288482746201,
+      "fraction_y": 0.4979254771836297
+    },
+    {
+      "id": "r0500_sw__n0",
+      "candidate_id": "r0500_sw",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.4771052782720909,
+      "fraction_y": 0.42876520635236515
+    },
+    {
+      "id": "r0500_s__n0",
+      "candidate_id": "r0500_s",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.5299196522682905,
+      "fraction_y": 0.400118084196659
+    },
+    {
+      "id": "r0500_se__n0",
+      "candidate_id": "r0500_se",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.5827340262644901,
+      "fraction_y": 0.42876520635236515
+    },
+    {
+      "id": "basin_center__n0",
+      "candidate_id": "basin_center",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.46739053353667254,
+      "fraction_y": 0.4841354242956461
+    },
+    {
+      "id": "basin_northeast__n0",
+      "candidate_id": "basin_northeast",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.6186391413211823,
+      "fraction_y": 0.5589105673071659
+    },
+    {
+      "id": "basin_northwest__n0",
+      "candidate_id": "basin_northwest",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.15859147906303406,
+      "fraction_y": 0.8499039056216876
+    },
+    {
+      "id": "basin_southeast__n0",
+      "candidate_id": "basin_southeast",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.7768510580062865,
+      "fraction_y": 0.17121445889015957
+    },
+    {
+      "id": "basin_southwest__n0",
+      "candidate_id": "basin_southwest",
+      "nuisance_start_id": "seed_offset_0",
+      "seed_offset": 0,
+      "mode": "domain_fraction",
+      "fraction_x": 0.2762518227100372,
+      "fraction_y": 0.08685429348172086
+    }
+  ]
+}

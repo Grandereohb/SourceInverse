@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "design_id": "synthetic_multilayout_particle_factorial_v1",
+  "split": "development_extension",
+  "truth_model": "lagrangian_particle_receptor_stress_model",
+  "generator_script": "scripts/generate_synthetic_particle_scenario.py",
+  "retention_rule": "retain and report all 36 generated scenarios without outcome-based removal",
+  "input_sets": {
+    "jjj_12station_rotating": {"sites": "data/jjj/sites.xlsx", "wind": "data/jjj/wind.xlsx"},
+    "shshjs_10station_steady": {"sites": "data/shsh_js/sites.xlsx", "wind": "data/shsh_js/wind.xlsx"},
+    "zhenhua_6station_rotating": {"sites": "data/zhenhua/sites.xlsx", "wind": "data/zhenhua/wind.xlsx"},
+    "zhenhua0417_6station_moderate": {"sites": "data/zhenhua0417/sites.xlsx", "wind": "data/zhenhua0417/wind.xlsx"}
+  },
+  "factorial": {
+    "scenario_prefix": "devp_particle",
+    "base_seed": 20261000,
+    "input_ids": ["jjj_12station_rotating", "shshjs_10station_steady", "zhenhua_6station_rotating", "zhenhua0417_6station_moderate"],
+    "positions": [
+      {"id": "center", "fraction_x": 0.50, "fraction_y": 0.50},
+      {"id": "west_edge", "fraction_x": 0.15, "fraction_y": 0.50},
+      {"id": "southwest_corner", "fraction_x": 0.15, "fraction_y": 0.15}
+    ],
+    "physics_conditions": [
+      {"id": "particle_near_matched", "diffusivity": 2.0, "sigma": 329.3, "decay": 0.50, "wind_factor": 0.25,
+       "diffusivity_along_m2s": 2.0, "diffusivity_cross_m2s": 2.0, "initial_sigma_along_m": 329.3, "initial_sigma_cross_m": 329.3, "meander_amplitude_m": 0.0},
+      {"id": "particle_anisotropic", "diffusivity": 6.5, "sigma": 195.0, "decay": 0.50, "wind_factor": 0.25,
+       "diffusivity_along_m2s": 12.0, "diffusivity_cross_m2s": 1.0, "initial_sigma_along_m": 300.0, "initial_sigma_cross_m": 90.0, "meander_amplitude_m": 0.0},
+      {"id": "particle_meandering", "diffusivity": 2.0, "sigma": 329.3, "decay": 0.50, "wind_factor": 0.25,
+       "diffusivity_along_m2s": 2.0, "diffusivity_cross_m2s": 2.0, "initial_sigma_along_m": 329.3, "initial_sigma_cross_m": 329.3, "meander_amplitude_m": 400.0}
+    ],
+    "defaults": {
+      "q_shape": "double_peak", "target_peak": 100.0,
+      "noise_absolute": 0.35, "noise_relative": 0.04,
+      "background_level": 3.0, "station_bias_fraction": 0.10,
+      "pre_event_hours": 1.0, "integration_dt_h": 0.02,
+      "sensor_kernel_sigma_m": 60.0, "meander_period_h": 6.0,
+      "particles_per_release": 64, "release_dt_h": 0.10
+    }
+  },
+  "analysis_intent": [
+    "Test whether Gaussian candidate-selection failures persist under a separately implemented particle receptor truth.",
+    "Separate near-matched particle discretization from anisotropy and coherent meander stress.",
+    "Development-only stress evidence; not a validated operational LPDM or final test set."
+  ]
+}

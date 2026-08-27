@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "design_id": "synthetic_test_matrix_v1",
+  "split": "test-OOD-layout",
+  "truth_model": "independent_gaussian_puff_fine_time_integration",
+  "retention_rule": "retain and report every generated scenario; freeze method and selective thresholds before truth-known evaluation",
+  "scenarios": [
+    {"scenario_id": "test_puff_0001", "seed": 20261001, "fraction_x": 0.20, "fraction_y": 0.20, "q_shape": "step", "target_peak": 100.0, "diffusivity": 5.0, "sigma": 90.0, "decay": 0.04, "wind_factor": 0.22, "noise_absolute": 0.30, "noise_relative": 0.03},
+    {"scenario_id": "test_puff_0002", "seed": 20261002, "fraction_x": 0.50, "fraction_y": 0.20, "q_shape": "double_peak", "target_peak": 125.0, "diffusivity": 11.0, "sigma": 150.0, "decay": 0.12, "wind_factor": 0.38, "noise_absolute": 0.40, "noise_relative": 0.05},
+    {"scenario_id": "test_puff_0003", "seed": 20261003, "fraction_x": 0.80, "fraction_y": 0.20, "q_shape": "single_pulse", "target_peak": 75.0, "diffusivity": 18.0, "sigma": 210.0, "decay": 0.22, "wind_factor": 0.55, "noise_absolute": 0.45, "noise_relative": 0.06},
+    {"scenario_id": "test_puff_0004", "seed": 20261004, "fraction_x": 0.20, "fraction_y": 0.50, "q_shape": "constant", "target_peak": 125.0, "diffusivity": 18.0, "sigma": 90.0, "decay": 0.12, "wind_factor": 0.22, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "test_puff_0005", "seed": 20261005, "fraction_x": 0.50, "fraction_y": 0.50, "q_shape": "step", "target_peak": 100.0, "diffusivity": 5.0, "sigma": 210.0, "decay": 0.22, "wind_factor": 0.38, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "test_puff_0006", "seed": 20261006, "fraction_x": 0.80, "fraction_y": 0.50, "q_shape": "double_peak", "target_peak": 75.0, "diffusivity": 11.0, "sigma": 150.0, "decay": 0.04, "wind_factor": 0.55, "noise_absolute": 0.50, "noise_relative": 0.06},
+    {"scenario_id": "test_puff_0007", "seed": 20261007, "fraction_x": 0.20, "fraction_y": 0.80, "q_shape": "single_pulse", "target_peak": 100.0, "diffusivity": 11.0, "sigma": 90.0, "decay": 0.22, "wind_factor": 0.22, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "test_puff_0008", "seed": 20261008, "fraction_x": 0.50, "fraction_y": 0.80, "q_shape": "constant", "target_peak": 125.0, "diffusivity": 18.0, "sigma": 150.0, "decay": 0.04, "wind_factor": 0.38, "noise_absolute": 0.30, "noise_relative": 0.03},
+    {"scenario_id": "test_puff_0009", "seed": 20261009, "fraction_x": 0.80, "fraction_y": 0.80, "q_shape": "step", "target_peak": 75.0, "diffusivity": 5.0, "sigma": 210.0, "decay": 0.12, "wind_factor": 0.55, "noise_absolute": 0.70, "noise_relative": 0.08},
+    {"scenario_id": "test_puff_0010", "seed": 20261010, "fraction_x": 0.05, "fraction_y": 0.50, "q_shape": "double_peak", "target_peak": 100.0, "diffusivity": 18.0, "sigma": 150.0, "decay": 0.22, "wind_factor": 0.38, "noise_absolute": 0.40, "noise_relative": 0.05},
+    {"scenario_id": "test_puff_0011", "seed": 20261011, "fraction_x": 0.95, "fraction_y": 0.50, "q_shape": "single_pulse", "target_peak": 125.0, "diffusivity": 11.0, "sigma": 210.0, "decay": 0.04, "wind_factor": 0.22, "noise_absolute": 0.35, "noise_relative": 0.04},
+    {"scenario_id": "test_puff_0012", "seed": 20261012, "fraction_x": 0.50, "fraction_y": 0.95, "q_shape": "constant", "target_peak": 100.0, "diffusivity": 5.0, "sigma": 90.0, "decay": 0.12, "wind_factor": 0.55, "noise_absolute": 0.45, "noise_relative": 0.05}
+  ],
+  "notes": [
+    "Uses the Zhenhua 6-station geometry and its 25-hour wind sequence, disjoint from development and calibration; this is an OOD-layout test, not test-ID.",
+    "The test design is frozen before the development single-start screen is evaluated against truth.",
+    "Do not tune parameters, diagnostics, or thresholds using test truth."
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "design_id": "dominant_station_holdout_dev_puff_0010_v1",
+  "purpose": "Truth-blind dominant-station deletion refit from selected checkpoint",
+  "selection_rule": "single warm-start refit after deleting the largest positive-residual-energy station",
+  "truth_isolation": "station selection uses concentrations only and does not read source truth",
+  "starts": [
+    {
+      "id": "dominant_station_holdout",
+      "mode": "domain_fraction",
+      "fraction_x": 0.23775660991668696,
+      "fraction_y": 0.8280855697794246
+    }
+  ]
+}

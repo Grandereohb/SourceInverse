@@ -6,8 +6,17 @@ from geo_utils import dms_to_decimal, latlon_to_xy
 TARGET_POLLUTANT_COLUMN = "TARGET_POLLUTANT"
 
 
+def _read_table(path):
+    suffix = str(path).lower()
+    if suffix.endswith(".csv"):
+        return pd.read_csv(path, encoding="utf-8-sig")
+    if suffix.endswith(".tsv") or suffix.endswith(".txt"):
+        return pd.read_csv(path, sep="\t", encoding="utf-8-sig")
+    return pd.read_excel(path)
+
+
 def load_sites(path):
-    df = pd.read_excel(path)
+    df = _read_table(path)
     # Two supported formats:
     # A) columns: station, lon, lat
     # B) columns: station, N, S, E ... with rows [lon, lat]
@@ -48,7 +57,7 @@ def load_sites(path):
 
 
 def load_wind(path):
-    df = pd.read_excel(path)
+    df = _read_table(path)
     # Expect columns: time, dir, sp (first column is time)
     cols = {str(c).lower(): c for c in df.columns}
     t_col = df.columns[0]
@@ -61,7 +70,7 @@ def load_wind(path):
 
 
 def load_conc(path):
-    df = pd.read_excel(path)
+    df = _read_table(path)
     # Expect columns: time, N, E, S (or other station labels); first column is time
     t_col = df.columns[0]
     out = df.copy()

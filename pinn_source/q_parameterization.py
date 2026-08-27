@@ -28,6 +28,18 @@ def configure_model_q(
     device,
 ):
     q_mode = (q_mode or "neural").lower()
+    if q_mode == "constant":
+        if hasattr(model, "configure_constant_q"):
+            model.configure_constant_q()
+        else:
+            model.q_mode = "constant"
+        model.to(device)
+        return {
+            "mode": "constant",
+            "n_segments": 1,
+            "breaks": np.asarray([], dtype=np.float32),
+            "segment_ids": np.zeros(len(t_values), dtype=int),
+        }
     if q_mode == "smooth_time":
         if hasattr(model, "configure_smooth_time_q"):
             model.configure_smooth_time_q(

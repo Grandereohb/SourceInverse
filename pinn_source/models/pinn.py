@@ -91,7 +91,9 @@ class PINN(nn.Module):
             return torch.exp(self.logQ)
         if t.dim() == 1:
             t = t.view(-1, 1)
-        if self.q_mode == "piecewise" and self.logQ_segments is not None:
+        if self.q_mode == "constant":
+            q = torch.exp(self.logQ).expand_as(t)
+        elif self.q_mode == "piecewise" and self.logQ_segments is not None:
             t_flat = t.reshape(-1).contiguous()
             segment_ids = torch.bucketize(t_flat, self.q_segment_breaks)
             logq = self.logQ + self.logQ_segments[segment_ids].view(-1, 1)
@@ -144,6 +146,14 @@ class PINN(nn.Module):
         else:
             q_times = torch.as_tensor(t_values, dtype=torch.float32).view(-1, 1)
         self.q_regularization_times = q_times
+
+    def configure_constant_q(self):
+        self.q_mode = "constant"
+        self.logQ_segments = None
+        self.logQ_time = None
+        self.q_regularization_times = torch.empty(
+            0, device=self.logQ.device, dtype=self.logQ.dtype
+        )
 
     def configure_smooth_time_q(self, t_values):
         q_times = torch.as_tensor(t_values, dtype=torch.float32).view(-1)

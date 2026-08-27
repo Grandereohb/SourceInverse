@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "config_id": "selective_diagnostic_development_v1",
+  "stage": "development_scalar_falsification",
+  "failure_threshold_m": 500.0,
+  "truth_usage": "truth is used only to evaluate localization risk after ranking by declared truth-blind features",
+  "retention_rule": "retain every scenario and every tied score group",
+  "prohibitions": [
+    "do not fit a final score or threshold on development",
+    "do not use oracle error, selection regret, or loss-error rank correlation as confidence features",
+    "do not report these curves as calibration or independent test performance"
+  ],
+  "features": [
+    {"name": "selected_best_raw_loss", "direction": "ascending"},
+    {"name": "selected_fit_raw_rmse", "direction": "ascending"},
+    {"name": "second_best_loss_relative_gap", "direction": "descending"},
+    {"name": "near_optimal_count", "direction": "ascending"},
+    {"name": "near_optimal_max_source_spread_m", "direction": "ascending"},
+    {"name": "selected_warning_count", "direction": "ascending"},
+    {"name": "selected_min_boundary_margin_m", "direction": "descending"},
+    {"name": "selected_dominant_station_ratio", "direction": "ascending"},
+    {"name": "selected_substep_cap_hit_count", "direction": "ascending"},
+    {"name": "selected_source_quadrature_cap_hit_count", "direction": "ascending"}
+  ]
+}

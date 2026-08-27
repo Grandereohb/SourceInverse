@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "design_id": "synthetic_multilayout_physics_factorial_v1",
+  "split": "development_extension",
+  "truth_model": "independent_gaussian_puff_fine_time_integration",
+  "retention_rule": "retain and report all 48 generated scenarios without outcome-based removal",
+  "input_sets": {
+    "jjj_12station_rotating": {
+      "sites": "data/jjj/sites.xlsx",
+      "wind": "data/jjj/wind.xlsx"
+    },
+    "shshjs_10station_steady": {
+      "sites": "data/shsh_js/sites.xlsx",
+      "wind": "data/shsh_js/wind.xlsx"
+    },
+    "zhenhua_6station_rotating": {
+      "sites": "data/zhenhua/sites.xlsx",
+      "wind": "data/zhenhua/wind.xlsx"
+    },
+    "zhenhua0417_6station_moderate": {
+      "sites": "data/zhenhua0417/sites.xlsx",
+      "wind": "data/zhenhua0417/wind.xlsx"
+    }
+  },
+  "factorial": {
+    "scenario_prefix": "devx_puff",
+    "base_seed": 20260900,
+    "input_ids": [
+      "jjj_12station_rotating",
+      "shshjs_10station_steady",
+      "zhenhua_6station_rotating",
+      "zhenhua0417_6station_moderate"
+    ],
+    "positions": [
+      {"id": "center", "fraction_x": 0.50, "fraction_y": 0.50},
+      {"id": "west_edge", "fraction_x": 0.15, "fraction_y": 0.50},
+      {"id": "southwest_corner", "fraction_x": 0.15, "fraction_y": 0.15}
+    ],
+    "physics_conditions": [
+      {"id": "matched_default", "diffusivity": 2.0, "sigma": 334.713, "decay": 0.50, "wind_factor": 0.25},
+      {"id": "dispersion_narrow", "diffusivity": 12.0, "sigma": 100.0, "decay": 0.50, "wind_factor": 0.25},
+      {"id": "decay_slow", "diffusivity": 2.0, "sigma": 334.713, "decay": 0.05, "wind_factor": 0.25},
+      {"id": "wind_coupling_fast", "diffusivity": 2.0, "sigma": 334.713, "decay": 0.50, "wind_factor": 0.50}
+    ],
+    "defaults": {
+      "q_shape": "double_peak",
+      "target_peak": 100.0,
+      "noise_absolute": 0.35,
+      "noise_relative": 0.04,
+      "background_level": 3.0,
+      "station_bias_fraction": 0.10,
+      "pre_event_hours": 1.0,
+      "integration_dt_h": 0.02
+    }
+  },
+  "analysis_intent": [
+    "Estimate physics-condition effects with 12 repeated layout-position cells per condition.",
+    "Hold release shape, signal peak, background, bias, and noise settings fixed.",
+    "Use only for development mechanism analysis; calibration and test remain sealed."
+  ]
+}

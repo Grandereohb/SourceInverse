@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "analysis_id": "observed_response_proxy_cross_design_v1",
+  "split": "development_only",
+  "proxy_definition": {
+    "station_background": "median of the three lowest observed concentrations at that station",
+    "station_peak_anomaly": "maximum observed concentration minus station background",
+    "responsive_threshold_fraction_of_global_peak": 0.05,
+    "low_observability_threshold": 1
+  },
+  "datasets": [
+    {
+      "id": "gaussian_truth_48",
+      "root": "synthetic_multilayout_physics_factorial_v1",
+      "evaluation": "analysis/gaussian_candidate_surfaces_fixed_physics_v1/truth_known_gaussian_surface_summary.json",
+      "rows_key": "rows"
+    },
+    {
+      "id": "particle_truth_36",
+      "root": "synthetic_multilayout_particle_factorial_v1",
+      "evaluation": "analysis/gaussian_candidate_surfaces_fixed_physics_v1/truth_known_summary.json",
+      "rows_key": "rows"
+    },
+    {
+      "id": "pinn_multistart_12",
+      "root": "synthetic_development_matrix_v1",
+      "evaluation": "analysis/inversion_multistart_smooth_time_v1/truth_known_multistart_matrix_summary.json",
+      "rows_key": "scenarios",
+      "method_default": "PINN_multistart_selected"
+    }
+  ],
+  "interpretation_limit": "Development-only cross-design audit. A proxy is not a calibrated reliability score merely because it separates failures in one dataset."
+}

@@ -67,11 +67,14 @@ RECURRENT_MAX_SUBSTEPS = 3
 RECURRENT_SOURCE_SCALE = 1.0
 RECURRENT_DECAY = 0.50  # 1/hour
 RECURRENT_INITIAL_RELEASE_FRACTION = 1.0
+# Keep the deployed recurrence as the default; paper experiments may opt into
+# the source-aware characteristic integration path.
+RECURRENT_SOLVER = "production"  # "production" or "characteristic"
 
 # =========================
 # Source Strength Q(t)
 # =========================
-Q_MODE = "smooth_time"  # "neural", "smooth_time", or "piecewise"
+Q_MODE = "smooth_time"  # "constant", "neural", "smooth_time", or "piecewise"
 Q_SEGMENT_LENGTH = 6
 Q_SMOOTH_WEIGHT = 0.0
 Q_L2_WEIGHT = 0.0001

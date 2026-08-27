@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "design_id": "transport_wind_perturbation_single_start_development_v1",
+  "stage": "development_truth_blind_diagnostic",
+  "coordinate_system": "pipeline_heuristic",
+  "selection_rule": "single run; compare source drift across predeclared wind-scale settings",
+  "truth_isolation": "the start and perturbation settings use no source truth",
+  "random_seed": 0,
+  "starts": [
+    {
+      "id": "heuristic",
+      "mode": "pipeline_heuristic"
+    }
+  ],
+  "wind_scale_settings": [0.20, 0.25, 0.30],
+  "baseline_reuse": "the 0.25 setting reuses the heuristic run from the frozen 12x6 development matrix when all input, code, seed, epoch, q-mode, source-mode, and physics hashes match",
+  "prohibitions": [
+    "do not choose perturbation settings using source truth",
+    "do not tune a deployment threshold on development",
+    "do not interpret source drift as a calibrated confidence interval"
+  ]
+}

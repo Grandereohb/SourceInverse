@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+import config as runtime_config
 
 from config import (
     EPOCHS,
@@ -93,6 +94,7 @@ from config import (
     RECURRENT_SOURCE_SCALE,
     RECURRENT_DECAY,
     RECURRENT_INITIAL_RELEASE_FRACTION,
+    RECURRENT_SOLVER,
 )
 from data_io import (
     load_sites,
@@ -115,6 +117,7 @@ from q_parameterization import (
 )
 from source_landscape import compute_source_loss_landscape
 from source_output import export_hourly_concentration_text_outputs
+from run_artifacts import save_reproducibility_bundle
 from transport_units import (
     normalize_decay_per_hour,
     normalize_diffusivity_m2s,
@@ -141,17 +144,23 @@ def _wind_step_stats(dir_deg):
     return float(np.mean(abs_deltas)), float(np.max(abs_deltas))
 
 
-def _apply_wind_vector_smoothing(data):
+def _apply_wind_vector_smoothing(data, enabled=None):
     raw_u, raw_v = wind_dir_to_uv(
         data["dir"].to_numpy(dtype=np.float64),
         data["sp"].to_numpy(dtype=np.float64),
         is_from=WIND_DIR_IS_FROM,
     )
     raw_sp = data["sp"].to_numpy(dtype=np.float64)
-    if not ENABLE_WIND_VECTOR_SMOOTHING or int(WIND_SMOOTH_WINDOW) <= 1:
+    enabled = (
+        _env_flag("PINN_ENABLE_WIND_VECTOR_SMOOTHING", ENABLE_WIND_VECTOR_SMOOTHING)
+        if enabled is None
+        else bool(enabled)
+    )
+    if not enabled or int(WIND_SMOOTH_WINDOW) <= 1:
         data["u_eff"] = raw_u
         data["v_eff"] = raw_v
         data["sp_eff"] = raw_sp
+        print("Wind vector smoothing: disabled")
         return data
 
     window = max(1, int(WIND_SMOOTH_WINDOW))
@@ -227,15 +236,17 @@ def _make_timestamped_output_dir(output_dir, run_id=None, name_suffix=None):
 
 def _copy_training_inputs(output_dir, site_path, conc_path, wind_path):
     input_files = [
-        ("sites.xlsx", site_path),
-        ("concentration.xlsx", conc_path),
-        ("wind.xlsx", wind_path),
+        ("sites", site_path),
+        ("concentration", conc_path),
+        ("wind", wind_path),
     ]
     copied_paths = {}
-    for output_name, source_path in input_files:
+    for canonical_name, source_path in input_files:
         source = Path(source_path).expanduser().resolve()
         if not source.exists():
             raise FileNotFoundError(f"Training input file not found: {source}")
+        suffix = source.suffix.lower() or ".dat"
+        output_name = f"{canonical_name}{suffix}"
         destination = output_dir / output_name
         if source != destination.resolve():
             shutil.copy2(source, destination)
@@ -275,6 +286,46 @@ def _env_int(name, default):
     if value is None or not str(value).strip():
         return int(default)
     return int(value)
+
+
+def _runtime_physics_settings():
+    settings = {
+        "wind_scale": _env_float("PINN_WIND_SCALE", WIND_SCALE),
+        "recurrent_decay_per_hour": _env_float(
+            "PINN_RECURRENT_DECAY", RECURRENT_DECAY
+        ),
+        "d_min_phys_m2s": _env_float("PINN_D_MIN_PHYS", D_MIN_PHYS),
+        "sigma_src_norm": _env_float("PINN_SIGMA_SRC", SIGMA_SRC),
+    }
+    for key, value in settings.items():
+        if not math.isfinite(value):
+            raise ValueError(f"{key} must be finite.")
+    if settings["wind_scale"] < 0.0:
+        raise ValueError("wind_scale must be non-negative.")
+    if settings["recurrent_decay_per_hour"] < 0.0:
+        raise ValueError("recurrent_decay_per_hour must be non-negative.")
+    if settings["d_min_phys_m2s"] < 0.0:
+        raise ValueError("d_min_phys_m2s must be non-negative.")
+    if settings["sigma_src_norm"] <= 0.0:
+        raise ValueError("sigma_src_norm must be positive.")
+    return settings
+
+
+def _runtime_q_mode():
+    mode = str(os.environ.get("PINN_Q_MODE", Q_MODE) or "").strip().lower()
+    allowed = {"constant", "neural", "smooth_time", "piecewise"}
+    if mode not in allowed:
+        raise ValueError(f"PINN_Q_MODE must be one of {sorted(allowed)}.")
+    return mode
+
+
+def _runtime_source_position_mode():
+    mode = str(
+        os.environ.get("PINN_SOURCE_POSITION_MODE", "single") or ""
+    ).strip().lower()
+    if mode not in {"single", "fixed"}:
+        raise ValueError("PINN_SOURCE_POSITION_MODE must be 'single' or 'fixed'.")
+    return mode
 
 
 def _select_ablation_stations(sites, station_cols):
@@ -436,6 +487,45 @@ def _compute_source_initial_position(
     return source_x_norm, source_y_norm, metadata
 
 
+def _apply_source_initial_override(
+    source_init_override_m,
+    *,
+    x0,
+    y0,
+    length_m,
+    source_x_min_m,
+    source_x_max_m,
+    source_y_min_m,
+    source_y_max_m,
+):
+    if source_init_override_m is None:
+        return None
+    if len(source_init_override_m) != 2:
+        raise ValueError("source_init_override_m must contain exactly (x_m, y_m).")
+    requested_x = float(source_init_override_m[0])
+    requested_y = float(source_init_override_m[1])
+    if not np.isfinite(requested_x) or not np.isfinite(requested_y):
+        raise ValueError("source_init_override_m values must be finite.")
+    clipped_x = float(np.clip(requested_x, source_x_min_m, source_x_max_m))
+    clipped_y = float(np.clip(requested_y, source_y_min_m, source_y_max_m))
+    length_m = max(float(length_m), 1e-12)
+    return (
+        (clipped_x - float(x0)) / length_m,
+        (clipped_y - float(y0)) / length_m,
+        {
+            "mode": "explicit_override",
+            "reason": "predeclared multistart source initialization",
+            "requested_x_m": requested_x,
+            "requested_y_m": requested_y,
+            "x_m": clipped_x,
+            "y_m": clipped_y,
+            "x_norm": (clipped_x - float(x0)) / length_m,
+            "y_norm": (clipped_y - float(y0)) / length_m,
+            "was_clipped": bool(clipped_x != requested_x or clipped_y != requested_y),
+        },
+    )
+
+
 def run(
     site_path,
     conc_path,
@@ -446,6 +536,9 @@ def run(
     make_plots=None,
     run_id=None,
     result_name_suffix=None,
+    source_init_override_m=None,
+    initial_checkpoint_path=None,
+    event_window_crop_override=None,
 ):
     if random_seed is not None:
         np.random.seed(int(random_seed))
@@ -473,6 +566,15 @@ def run(
         + ", ".join(str(Path(path).name) for path in copied_input_paths.values())
     )
     make_plots = MAKE_PLOTS if make_plots is None else bool(make_plots)
+    runtime_physics = _runtime_physics_settings()
+    runtime_wind_scale = runtime_physics["wind_scale"]
+    runtime_decay_per_hour = runtime_physics["recurrent_decay_per_hour"]
+    runtime_d_min_phys = runtime_physics["d_min_phys_m2s"]
+    runtime_sigma_src = runtime_physics["sigma_src_norm"]
+    runtime_q_mode = _runtime_q_mode()
+    runtime_wind_smoothing = _env_flag(
+        "PINN_ENABLE_WIND_VECTOR_SMOOTHING", ENABLE_WIND_VECTOR_SMOOTHING
+    )
 
     sites, lon0, lat0 = load_sites(site_path)
     wind = load_wind(wind_path)
@@ -524,7 +626,12 @@ def run(
     baseline_vals = baseline_series.to_numpy(dtype=np.float64)
 
     # Keep only the main anomaly window if requested, with a small time padding on both ends.
-    if ENABLE_EVENT_WINDOW_CROP:
+    runtime_event_window_crop = (
+        bool(ENABLE_EVENT_WINDOW_CROP)
+        if event_window_crop_override is None
+        else bool(event_window_crop_override)
+    )
+    if runtime_event_window_crop:
         residual_matrix = np.clip(
             station_matrix.to_numpy(dtype=np.float64) - baseline_vals[:, None],
             a_min=0.0,
@@ -561,7 +668,7 @@ def run(
                 "Event window crop: no anomaly window detected, using full time range."
             )
 
-    data = _apply_wind_vector_smoothing(data)
+    data = _apply_wind_vector_smoothing(data, enabled=runtime_wind_smoothing)
 
     # Build observation dataset
     obs = []
@@ -676,10 +783,22 @@ def run(
         station_labels=obs_station_labels,
         time_labels=obs_time_labels,
     )
+    source_override = _apply_source_initial_override(
+        source_init_override_m,
+        x0=x0,
+        y0=y0,
+        length_m=L,
+        source_x_min_m=source_x_min_p,
+        source_x_max_m=source_x_max_p,
+        source_y_min_m=source_y_min_p,
+        source_y_max_m=source_y_max_p,
+    )
+    if source_override is not None:
+        source_init_x, source_init_y, source_init_metadata = source_override
 
     # Convert measured m/s wind to normalized distance per normalized time.
-    u_obs = normalize_velocity_mps(u_obs, T, L, factor=WIND_SCALE)
-    v_obs = normalize_velocity_mps(v_obs, T, L, factor=WIND_SCALE)
+    u_obs = normalize_velocity_mps(u_obs, T, L, factor=runtime_wind_scale)
+    v_obs = normalize_velocity_mps(v_obs, T, L, factor=runtime_wind_scale)
 
     # Normalized training bounds
     x_min, x_max = (x_min_p - x0) / L, (x_max_p - x0) / L
@@ -865,15 +984,27 @@ def run(
         model.set_q_bounds(Q_MIN, Q_MAX)
     q_segment_info = configure_model_q(
         model=model,
-        q_mode=Q_MODE,
+        q_mode=runtime_q_mode,
         t_values=t_w,
         segment_length=Q_SEGMENT_LENGTH,
         device=device,
     )
+    source_position_mode = _runtime_source_position_mode()
+    if source_position_mode == "fixed":
+        model.xs.requires_grad_(False)
+        model.ys.requires_grad_(False)
     if hasattr(model, "configure_transport_history"):
         model.configure_transport_history(t_w, u_w, v_w)
         model.to(device)
     if FIELD_MODE == "recurrent_pde":
+        recurrent_solver = str(
+            os.environ.get("PINN_RECURRENT_SOLVER", RECURRENT_SOLVER)
+        ).strip().lower()
+        if recurrent_solver not in {"production", "characteristic"}:
+            raise ValueError(
+                "PINN_RECURRENT_SOLVER must be 'production' or 'characteristic'."
+            )
+        model.recurrent_solver = recurrent_solver
         configure_recurrent_context(
             model=model,
             x_min=x_min,
@@ -883,9 +1014,37 @@ def run(
             t_values=t_w,
             u_values=u_w,
             v_values=v_w,
-            d_min_norm=normalize_diffusivity_m2s(D_MIN_PHYS, T, L),
+            d_min_norm=normalize_diffusivity_m2s(runtime_d_min_phys, T, L),
             d_scale_norm=normalize_diffusivity_m2s(1.0, T, L),
-            decay_norm=normalize_decay_per_hour(RECURRENT_DECAY, T),
+            decay_norm=normalize_decay_per_hour(runtime_decay_per_hour, T),
+        )
+    initial_checkpoint_metadata = None
+    if initial_checkpoint_path is not None:
+        checkpoint_path = Path(initial_checkpoint_path).resolve()
+        if not checkpoint_path.is_file():
+            raise FileNotFoundError(
+                f"initial checkpoint does not exist: {checkpoint_path}"
+            )
+        checkpoint_payload = torch.load(
+            checkpoint_path, map_location=device, weights_only=True
+        )
+        checkpoint_state = checkpoint_payload.get("model_state_dict")
+        if not isinstance(checkpoint_state, dict):
+            raise ValueError(
+                f"initial checkpoint has no model_state_dict: {checkpoint_path}"
+            )
+        model.load_state_dict(checkpoint_state, strict=True)
+        with torch.no_grad():
+            model.xs.fill_(float(source_init_x))
+            model.ys.fill_(float(source_init_y))
+        initial_checkpoint_metadata = {
+            "path": str(checkpoint_path),
+            "best_epoch": int(checkpoint_payload.get("best_epoch", -1)),
+            "best_raw_loss": float(checkpoint_payload.get("best_raw_loss", float("nan"))),
+        }
+        print(
+            "Warm-started nuisance parameters from checkpoint: "
+            f"{checkpoint_path} (source coordinates reset to fixed candidate)"
         )
     recurrent_substep_counts = tuple(
         getattr(model, "recurrent_substeps_per_interval", ())
@@ -915,7 +1074,7 @@ def run(
             )
     else:
         print("Q mode: neural")
-    print("Source position mode: single")
+    print(f"Source position mode: {source_position_mode}")
     training_epochs = max(_env_int("PINN_EPOCHS", EPOCHS), 1)
     print(
         "Training speed settings: "
@@ -949,8 +1108,10 @@ def run(
         ]
         print(
             "Recurrent transport settings: "
-            f"wind_factor={WIND_SCALE:.3f}, D_min_m2s={D_MIN_PHYS:.3f}, "
-            f"decay_per_hour={RECURRENT_DECAY:.3f}, "
+            f"solver={recurrent_solver}, "
+            f"wind_factor={runtime_wind_scale:.3f}, "
+            f"D_min_m2s={runtime_d_min_phys:.3f}, "
+            f"decay_per_hour={runtime_decay_per_hour:.3f}, "
             f"adaptive_substeps={RECURRENT_ADAPTIVE_SUBSTEPS}, "
             f"substeps[min/mean/max]={selected_min}/{selected_mean:.2f}/{selected_max}, "
             f"max_cells_per_substep={max(actual_cells, default=0.0):.3f}, "
@@ -1006,7 +1167,10 @@ def run(
 
     diagnostic_rows = []
 
+    training_start_time = time.perf_counter()
+    completed_epochs = 0
     for epoch in range(1, training_epochs + 1):
+        completed_epochs = epoch
         sync_device()
         epoch_start_time = time.perf_counter()
         timing_data_forward = 0.0
@@ -1022,7 +1186,7 @@ def run(
         xs = model.xs
         ys = model.ys
         bg_obs, plume_obs, q_obs, gate_obs, source_obs = field_components(
-            model, xyt_obs, u_obs_t, v_obs_t, SIGMA_SRC
+            model, xyt_obs, u_obs_t, v_obs_t, runtime_sigma_src
         )
         c_pred = concentration_from_components(bg_obs, plume_obs, q_obs, source_obs)
         c_pred_flat = c_pred.view(-1)
@@ -1254,7 +1418,7 @@ def run(
                     center_gate,
                     center_source,
                 ) = field_components(
-                    model, center_pts, center_u, center_v, SIGMA_SRC
+                    model, center_pts, center_u, center_v, runtime_sigma_src
                 )
                 center_pred = concentration_from_components(
                     center_bg, center_plume, center_q, center_source
@@ -1370,6 +1534,7 @@ def run(
                 )
             )
 
+    training_wall_time_s = time.perf_counter() - training_start_time
     if best_model_state is not None and best_epoch > 0:
         model.load_state_dict(
             {key: value.to(device) for key, value in best_model_state.items()}
@@ -1399,6 +1564,94 @@ def run(
         q_max=Q_MAX,
     )
 
+    final_d_multiplier = float(model.D().detach().cpu().item())
+    final_d_norm = float(getattr(model, "recurrent_d_min_norm", 0.0)) + (
+        final_d_multiplier * float(getattr(model, "recurrent_d_scale_norm", 1.0))
+    )
+    reproducibility_artifacts = save_reproducibility_bundle(
+        output_dir=output_dir,
+        model=model,
+        config_module=runtime_config,
+        best_epoch=best_epoch,
+        best_raw_loss=best_raw_loss,
+        random_seed=random_seed,
+        source={
+            "x_norm": float(xs),
+            "y_norm": float(ys),
+            "x_m": float(xs_p),
+            "y_m": float(ys_p),
+            "lon": float(pred_lon),
+            "lat": float(pred_lat),
+        },
+        normalization={
+            "x_center_m": float(x0),
+            "y_center_m": float(y0),
+            "length_m": float(L),
+            "duration_hours": float(T),
+            "time_origin_hours": float(t0_p),
+            "concentration_scale": float(c_scale),
+        },
+        final_transport={
+            "rawD": float(model.rawD.detach().cpu().item()),
+            "model_D_multiplier_m2s": final_d_multiplier,
+            "effective_diffusivity_m2s": float(
+                runtime_d_min_phys + final_d_multiplier
+            ),
+            "effective_diffusivity_norm": final_d_norm,
+            "decay_per_hour": float(runtime_decay_per_hour),
+            "wind_factor": float(runtime_wind_scale),
+            "source_sigma_norm": float(runtime_sigma_src),
+            "wind_vector_smoothing_enabled": bool(runtime_wind_smoothing),
+        },
+        recurrent_context={
+            "time_labels": [str(value) for value in time_w_labels],
+            "t_values_norm": [float(value) for value in t_w],
+            "u_values_norm": [float(value) for value in u_w],
+            "v_values_norm": [float(value) for value in v_w],
+            "baseline_values_raw": [float(value) for value in baseline_w],
+            "x_min_norm": float(x_min),
+            "x_max_norm": float(x_max),
+            "y_min_norm": float(y_min),
+            "y_max_norm": float(y_max),
+            "initial_release_dt_norm": float(
+                getattr(model, "recurrent_initial_release_dt", 1.0)
+            ),
+            "substeps_per_interval": list(recurrent_substep_counts),
+        },
+        runtime={
+            "training_epochs": int(training_epochs),
+            "completed_epochs": int(completed_epochs),
+            "training_wall_time_s": float(training_wall_time_s),
+            "device_preference": str(device_pref),
+            "resolved_device": str(device),
+            "make_plots": bool(make_plots),
+            "run_id": run_id,
+            "result_name_suffix": result_name_suffix,
+            "source_init_override_m": (
+                [float(value) for value in source_init_override_m]
+                if source_init_override_m is not None
+                else None
+            ),
+            "output_dir": str(output_dir),
+            "result_root_dir": str(result_root_dir or OUTPUT_DIR),
+            "recurrent_solver": str(
+                getattr(model, "recurrent_solver", "production")
+            ),
+            "q_mode": str(getattr(model, "q_mode", runtime_q_mode)),
+            "source_position_mode": source_position_mode,
+            "initial_checkpoint": initial_checkpoint_metadata,
+            "event_window_crop_enabled": runtime_event_window_crop,
+        },
+        q_time_series=q_time_series_df,
+        copied_input_paths=copied_input_paths,
+        repo_root=Path(__file__).resolve().parents[1],
+    )
+    print(
+        "Saved reproducibility bundle: "
+        f"checkpoint={reproducibility_artifacts['checkpoint']}, "
+        f"manifest={reproducibility_artifacts['manifest']}"
+    )
+
     inversion_text_exports = export_hourly_concentration_text_outputs(
         model=model,
         output_dir=output_dir,
@@ -1415,7 +1668,7 @@ def run(
         length_m=L,
         duration_hours=T,
         c_scale=c_scale,
-        sigma_src=SIGMA_SRC,
+        sigma_src=runtime_sigma_src,
         source_lon=pred_lon,
         source_lat=pred_lat,
     )
@@ -1428,7 +1681,7 @@ def run(
     xyt_diag = torch.cat([x_obs_t, y_obs_t, t_obs_t], dim=1)
     with torch.no_grad():
         bg_diag, plume_diag, q_diag, gate_diag, source_diag = field_components(
-            model, xyt_diag, u_obs_t, v_obs_t, SIGMA_SRC
+            model, xyt_diag, u_obs_t, v_obs_t, runtime_sigma_src
         )
         pred_diag = concentration_from_components(
             bg_diag, plume_diag, q_diag, source_diag
@@ -1667,12 +1920,30 @@ def run(
                 ),
                 "substep_cap_hit_count": int(cap_hit_count),
                 "source_scale": float(RECURRENT_SOURCE_SCALE),
-                "decay": float(RECURRENT_DECAY),
+                "decay": float(runtime_decay_per_hour),
                 "decay_units": "1/hour",
                 "decay_norm": float(getattr(model, "recurrent_decay_norm", 0.0)),
-                "wind_factor": float(WIND_SCALE),
+                "wind_factor": float(runtime_wind_scale),
                 "diffusion_units": "m^2/s",
                 "initial_release_fraction": float(RECURRENT_INITIAL_RELEASE_FRACTION),
+                "solver": str(getattr(model, "recurrent_solver", "production")),
+                "source_quadrature_panels_per_interval": list(
+                    getattr(
+                        model,
+                        "research_source_quadrature_panels_per_interval",
+                        (),
+                    )
+                ),
+                "source_quadrature_required_per_interval": list(
+                    getattr(
+                        model,
+                        "research_source_quadrature_required_per_interval",
+                        (),
+                    )
+                ),
+                "source_quadrature_cap_hit_count": int(
+                    getattr(model, "research_source_quadrature_cap_hit_count", 0)
+                ),
                 "d_min_norm": float(getattr(model, "recurrent_d_min_norm", 0.0)),
                 "d_scale_norm": float(getattr(model, "recurrent_d_scale_norm", 1.0)),
             }
@@ -1693,6 +1964,7 @@ def run(
             "min_boundary_margin_m": float(source_margin_m),
         },
         "inversion_text_outputs": inversion_text_exports,
+        "reproducibility": reproducibility_artifacts,
         "fit_raw_rmse": fit_rmse_quality,
         "field_components": {
             "plume_mean": float(np.mean(plume_diag_np)),
@@ -1733,7 +2005,7 @@ def run(
             v_obs_t=v_obs_t,
             c_obs_t=c_obs_t,
             data_weight_t=data_weight_t,
-            sigma_src=SIGMA_SRC,
+            sigma_src=runtime_sigma_src,
             radius_m=SOURCE_LANDSCAPE_RADIUS_M,
             step_m=SOURCE_LANDSCAPE_STEP_M,
             temperature=SOURCE_LANDSCAPE_TEMPERATURE,
@@ -1894,7 +2166,7 @@ def run(
             u_w=u_w,
             v_w=v_w,
             baseline_w=baseline_w,
-            sigma_src=SIGMA_SRC,
+            sigma_src=runtime_sigma_src,
             c_scale=c_scale,
             n_frames=DIFFUSION_N_FRAMES,
             nx=DIFFUSION_NX,
@@ -1913,7 +2185,7 @@ def run(
         "ys_norm": float(ys),
         "pred_lat": float(pred_lat),
         "pred_lon": float(pred_lon),
-        "source_position_mode": "single",
+        "source_position_mode": source_position_mode,
         "best_epoch": int(best_epoch),
         "total_loss": float(best_raw_loss),
         "data_loss": float(loss_data.detach().item()),

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "design_id": "development_single_start_screen_v1",
+  "coordinate_system": "pipeline_heuristic",
+  "source_domain_definition": "station envelope expanded by SOURCE_POSITION_PAD_M on each side",
+  "selection_rule": "the only completed run",
+  "random_seed": 0,
+  "starts": [
+    {
+      "id": "heuristic",
+      "mode": "pipeline_heuristic"
+    }
+  ],
+  "notes": [
+    "Stage-1 screen applied to every retained development scenario before any result is inspected.",
+    "The pipeline heuristic is the maximum-anomaly station shifted 1000 m upwind, matching the B1 initialization rule.",
+    "No source-truth coordinate is read or used by the execution runner.",
+    "This screen diagnoses whether optimization improves on a common initialization; it is not a multistart identifiability result."
+  ]
+}
