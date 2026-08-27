@@ -17,8 +17,10 @@ The paper workflow has four stages:
    `evaluate_gaussian_candidate_surfaces_truth.py`, and
    `evaluate_simple_baseline_matrix_truth.py`.
 4. Build the selected-versus-oracle failure decomposition with
-   `compare_cross_method_failure_mechanisms.py`. Diagnostic sensitivity scripts
-   are secondary analyses and must not be used to tune the frozen test set.
+   `compare_cross_method_failure_mechanisms.py`. For the frozen Sumitomo OOD
+   test, apply the preregistered joint Wilson-bound rule with
+   `summarize_reliability_audit_test.py`. Diagnostic sensitivity scripts are
+   secondary analyses and must not be used to tune the frozen test set.
 
 The independent test protocol is
 `reliability_audit_test_ood_sumitomo_v1.json`. It is frozen but intentionally
