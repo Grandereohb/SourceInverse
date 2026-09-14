@@ -28,3 +28,6 @@ result/
 outputs/
 diffusion.gif
 deployment_runs/
+
+# Local cross-branch conversation and project history
+project_status.md
