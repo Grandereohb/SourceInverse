@@ -8,9 +8,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING=utf-8 \
     PYTHONPATH=/build:/build/pinn_source \
-    NUITKA_CACHE_DIR=/root/.cache/Nuitka
+    NUITKA_CACHE_DIR=/root/.cache/Nuitka \
+    PIP_DEFAULT_TIMEOUT=300 \
+    PIP_RETRIES=10
 
-RUN apt-get update \
+RUN apt-get -o Acquire::Retries=5 update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         ccache \
@@ -22,10 +24,9 @@ WORKDIR /build
 COPY deployment/requirements-api.txt /tmp/requirements-api.txt
 COPY deployment/requirements-build.txt /tmp/requirements-build.txt
 RUN pip install --no-cache-dir "torch==${TORCH_VERSION}" \
-        --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir \
-        -r /tmp/requirements-api.txt \
-        -r /tmp/requirements-build.txt
+        --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir -r /tmp/requirements-api.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-build.txt
 
 COPY source_inversion_launcher.py /build/source_inversion_launcher.py
 COPY deployment /build/deployment
@@ -71,7 +72,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     OMP_NUM_THREADS=4 \
     MKL_NUM_THREADS=4
 
-RUN apt-get update \
+RUN apt-get -o Acquire::Retries=5 update \
     && apt-get install -y --no-install-recommends libgomp1 fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 appuser \
