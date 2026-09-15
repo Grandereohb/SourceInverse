@@ -47,8 +47,13 @@ pip install -r deployment/requirements-api.txt
 export SOURCE_INVERSION_API_TOKEN='replace-with-a-secret'
 export SOURCE_INVERSION_CALLBACK_TOKEN='replace-with-a-secret'
 export SOURCE_INVERSION_WORK_ROOT='./deployment_runs/api'
-uvicorn deployment.api:app --host 0.0.0.0 --port 8000 --workers 1
+python -m deployment.entrypoint serve --host 0.0.0.0 --port 8000
 ```
+
+The same entry point also exposes the isolated `worker` command used by the
+service. Source development uses the existing Python-module fallback. A future
+compiled image sets `SOURCE_INVERSION_EXECUTABLE` to the compiled launcher, and
+the API invokes `<executable> worker ...` without requiring `python -m`.
 
 Submit and inspect an asynchronous job:
 
@@ -102,3 +107,60 @@ Before deployment, replace both example tokens and set the real callback host
 in `deployment/docker-compose.yml`. Job data is persisted in the
 `source-inversion-data` volume under `/data/jobs`. The image uses Python 3.11,
 CPU-only PyTorch, a non-root user, and one Uvicorn worker.
+
+## Protected Linux Image
+
+The protected build compiles the first-party Python entry point and algorithm
+modules with Nuitka in a builder stage. The runtime stage receives only the
+standalone compiled distribution, runtime system libraries, and the Python base
+runtime; repository source, tests, Git metadata, and compiler output are not
+copied into the delivered image.
+
+On the trusted Ubuntu x86-64 build server, first load and tag the offline base
+image if it is not already present:
+
+```bash
+sha256sum -c python_3.11_slim_linux_amd64.tar.sha256
+sudo docker load -i python_3.11_slim_linux_amd64.tar
+sudo docker tag public.ecr.aws/docker/library/python:3.11-slim python:3.11-slim
+sudo docker run --rm python:3.11-slim python --version
+```
+
+Then build and scan the protected image from the repository root:
+
+```bash
+chmod +x deployment/build_protected_image.sh deployment/scan_runtime_image.sh
+sudo -E deployment/build_protected_image.sh
+```
+
+The build uses `--pull=false` and therefore requires `python:3.11-slim` to be
+present in the server's local image store. Python packages and Debian build
+packages are still downloaded during the build, so the trusted build server
+must retain access to PyPI, the PyTorch CPU wheel index, and Debian repositories.
+
+Create a private runtime environment file without committing its secrets, then
+start the already-built image without exposing the repository as a volume:
+
+```bash
+cp deployment/runtime.env.example deployment/runtime.env
+chmod 600 deployment/runtime.env
+sudo docker compose \
+  --env-file deployment/runtime.env \
+  -f deployment/docker-compose.runtime.yml \
+  up -d
+```
+
+The runtime Compose file has no `build:` section and sets `pull_policy: never`,
+so the client host only needs the exported final image. Before delivery, export
+and checksum that image on the trusted build server:
+
+```bash
+sudo docker save source-inversion:protected -o source-inversion_protected_amd64.tar
+sha256sum source-inversion_protected_amd64.tar \
+  > source-inversion_protected_amd64.tar.sha256
+```
+
+Nuitka compilation raises the cost of recovering implementation details but is
+not absolute protection against a privileged host administrator. Keep the
+builder stage and repository on a trusted server, and deliver only the final
+runtime image archive, checksum, runtime Compose file, and environment template.

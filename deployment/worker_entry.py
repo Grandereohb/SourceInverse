@@ -14,7 +14,7 @@ if str(PINN_DIR) not in sys.path:
 from pipeline import run  # noqa: E402
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one isolated source inversion job")
     parser.add_argument("--sites", required=True)
     parser.add_argument("--concentration", required=True)
@@ -25,11 +25,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--result-json", required=True)
     parser.add_argument("--random-seed", type=int, default=0)
     parser.add_argument("--make-plots", action="store_true")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv=None) -> None:
+    args = parse_args(argv)
     result = run(
         site_path=args.sites,
         conc_path=args.concentration,

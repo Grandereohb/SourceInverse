@@ -8,6 +8,20 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+EXECUTABLE_ENV = "SOURCE_INVERSION_EXECUTABLE"
+
+
+def build_worker_command(worker_args: list[str]) -> list[str]:
+    executable = os.environ.get(EXECUTABLE_ENV, "").strip()
+    if executable:
+        return [executable, "worker", *worker_args]
+    return [
+        sys.executable,
+        "-u",
+        "-m",
+        "deployment.worker_entry",
+        *worker_args,
+    ]
 
 
 def run_algorithm(
@@ -26,11 +40,7 @@ def run_algorithm(
     stdout_path = logs_dir / "stdout.log"
     stderr_path = logs_dir / "stderr.log"
 
-    command = [
-        sys.executable,
-        "-u",
-        "-m",
-        "deployment.worker_entry",
+    worker_args = [
         "--sites",
         str(paths["sites"]),
         "--concentration",
@@ -49,7 +59,8 @@ def run_algorithm(
         str(random_seed),
     ]
     if make_plots:
-        command.append("--make-plots")
+        worker_args.append("--make-plots")
+    command = build_worker_command(worker_args)
 
     env = os.environ.copy()
     env.update(

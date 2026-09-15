@@ -28,6 +28,8 @@ result/
 outputs/
 diffusion.gif
 deployment_runs/
+deployment_artifacts/
+deployment/runtime.env
 
 # Local cross-branch conversation and project history
 project_status.md

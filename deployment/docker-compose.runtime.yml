@@ -1,0 +1,33 @@
+services:
+  source-inversion:
+    image: ${SOURCE_INVERSION_IMAGE:-source-inversion:protected}
+    pull_policy: never
+    restart: unless-stopped
+    ports:
+      - "${SOURCE_INVERSION_PORT:-8000}:8000"
+    environment:
+      SOURCE_INVERSION_API_TOKEN: ${SOURCE_INVERSION_API_TOKEN:?set SOURCE_INVERSION_API_TOKEN}
+      SOURCE_INVERSION_CALLBACK_TOKEN: ${SOURCE_INVERSION_CALLBACK_TOKEN:-}
+      SOURCE_INVERSION_CALLBACK_URL_OVERRIDE: ${SOURCE_INVERSION_CALLBACK_URL_OVERRIDE:-}
+      SOURCE_INVERSION_CALLBACK_ALLOWED_HOSTS: ${SOURCE_INVERSION_CALLBACK_ALLOWED_HOSTS:-}
+      SOURCE_INVERSION_QUEUE_SIZE: ${SOURCE_INVERSION_QUEUE_SIZE:-8}
+      SOURCE_INVERSION_MAX_BODY_BYTES: ${SOURCE_INVERSION_MAX_BODY_BYTES:-10485760}
+      SOURCE_INVERSION_CALLBACK_TIMEOUT_SECONDS: ${SOURCE_INVERSION_CALLBACK_TIMEOUT_SECONDS:-30}
+      SOURCE_INVERSION_CALLBACK_RETRY_DELAYS_SECONDS: ${SOURCE_INVERSION_CALLBACK_RETRY_DELAYS_SECONDS:-0,60,300}
+      SOURCE_INVERSION_MAKE_PLOTS: ${SOURCE_INVERSION_MAKE_PLOTS:-0}
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-4}
+      MKL_NUM_THREADS: ${MKL_NUM_THREADS:-4}
+    volumes:
+      - source-inversion-data:/data/jobs
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    init: true
+
+volumes:
+  source-inversion-data:

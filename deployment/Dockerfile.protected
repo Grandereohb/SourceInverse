@@ -1,0 +1,94 @@
+ARG BASE_IMAGE=python:3.11-slim
+
+FROM ${BASE_IMAGE} AS builder
+
+ARG TORCH_VERSION=2.7.1
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=utf-8 \
+    PYTHONPATH=/build:/build/pinn_source \
+    NUITKA_CACHE_DIR=/root/.cache/Nuitka
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ccache \
+        patchelf \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+COPY deployment/requirements-api.txt /tmp/requirements-api.txt
+COPY deployment/requirements-build.txt /tmp/requirements-build.txt
+RUN pip install --no-cache-dir "torch==${TORCH_VERSION}" \
+        --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir \
+        -r /tmp/requirements-api.txt \
+        -r /tmp/requirements-build.txt
+
+COPY source_inversion_launcher.py /build/source_inversion_launcher.py
+COPY deployment /build/deployment
+COPY pinn_source /build/pinn_source
+
+# Keep the first protected prototype in standalone mode so missing modules are
+# visible during testing. Onefile packaging can be evaluated after acceptance.
+RUN python -m nuitka \
+        --mode=standalone \
+        --assume-yes-for-downloads \
+        --output-dir=/build/nuitka-output \
+        --output-filename=source-inversion \
+        --report=/build/nuitka-output/nuitka-report.xml \
+        --include-module=deployment.api \
+        --include-module=deployment.worker_entry \
+        --include-module=pipeline \
+        --include-module=models.pinn \
+        --include-package-data=matplotlib \
+        /build/source_inversion_launcher.py \
+    && test -x /build/nuitka-output/source_inversion_launcher.dist/source-inversion
+
+FROM ${BASE_IMAGE} AS runtime
+
+ARG BUILD_REVISION=unknown
+ARG BUILD_DATE=unknown
+
+LABEL org.opencontainers.image.title="SourceInverse protected runtime" \
+      org.opencontainers.image.description="CPU source-inversion HTTP service" \
+      org.opencontainers.image.revision="${BUILD_REVISION}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=utf-8 \
+    MPLBACKEND=Agg \
+    MPLCONFIGDIR=/data/matplotlib \
+    PINN_DEVICE=cpu \
+    PINN_AUTO_CLOSE_PLOTS=1 \
+    SOURCE_INVERSION_EXECUTABLE=/opt/source-inversion/source-inversion \
+    SOURCE_INVERSION_WORK_ROOT=/data/jobs \
+    SOURCE_INVERSION_QUEUE_SIZE=8 \
+    SOURCE_INVERSION_MAKE_PLOTS=0 \
+    OMP_NUM_THREADS=4 \
+    MKL_NUM_THREADS=4
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 appuser \
+    && mkdir -p /opt/source-inversion /data/jobs /data/matplotlib \
+    && chown -R appuser:appuser /opt/source-inversion /data
+
+COPY --from=builder --chown=appuser:appuser \
+    /build/nuitka-output/source_inversion_launcher.dist/ \
+    /opt/source-inversion/
+
+USER appuser
+WORKDIR /opt/source-inversion
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)" || exit 1
+
+ENTRYPOINT ["/opt/source-inversion/source-inversion"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "8000"]
