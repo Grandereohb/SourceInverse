@@ -25,14 +25,12 @@ REPO_ROOT = SCRIPT_DIR.parent
 DATA_DIR = REPO_ROOT / "data"
 OUTPUT_DIR = DATA_DIR / "abnormal_high_monitor_data"
 
-DEFAULT_INPUT_PATH = (
-    DATA_DIR / "jjj" / "2026年小时数据" / "567月小时数据_标准单位_汇总.xlsx"
-)
-DEFAULT_OUTPUT_NAME = "abnormal_high_monitor_data_jjj_567.xlsx"
+DEFAULT_INPUT_PATH = DATA_DIR / "jjj" / "2026年小时数据" / "8月小时数据_指定污染物.xlsx"
+DEFAULT_OUTPUT_NAME = "abnormal_high_monitor_data_jjj_8_special.xlsx"
 
 # Only output abnormal records whose concentration is at least this value.
 # Overall pollutant means are still calculated from all data.
-MIN_CONCENTRATION_THRESHOLD = 600.0
+MIN_CONCENTRATION_THRESHOLD = 30.0
 TIME_COLUMN = "时间"
 
 # Pollutants in this list are excluded from both threshold calculation and output.

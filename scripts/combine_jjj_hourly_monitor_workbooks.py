@@ -11,9 +11,9 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 DATA_DIR = REPO_ROOT / "data"
 
-DEFAULT_INPUT_DIR = DATA_DIR / "jjj" / "2026年小时数据" / "7月小时数据"
+DEFAULT_INPUT_DIR = DATA_DIR / "jjj" / "2026年小时数据" / "8月小时数据"
 DEFAULT_OUTPUT_PATH = (
-    DATA_DIR / "jjj" / "2026年小时数据" / "7月小时数据_标准单位_汇总.xlsx"
+    DATA_DIR / "jjj" / "2026年小时数据" / "8月小时数据_标准单位_汇总.xlsx"
 )
 
 TIME_COLUMN = "时间"

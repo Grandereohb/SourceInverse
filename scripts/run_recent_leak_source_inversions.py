@@ -20,25 +20,24 @@ ABNORMAL_DIR = DATA_DIR / "abnormal_high_monitor_data"
 PINN_SCRIPT = REPO_ROOT / "pinn_source" / "pinn_source_pinn.py"
 PINN_CONFIG = REPO_ROOT / "pinn_source" / "config.py"
 
-INPUT_FILE_PATH = ABNORMAL_DIR / "abnormal_high_monitoar_data_july.xlsx"
+# shanghaishihua input
+# INPUT_FILE_PATH = ABNORMAL_DIR / "abnormal_high_monitoar_data_july.xlsx"
 
-MONITOR_INPUT_PATH = (
-    DATA_DIR
-    / "shsh_js"
-    / "自动审核小时数据_标准单位_2026-07-01 00_00_00_2026-08-01 12_00_00.xlsx"
-)
+# MONITOR_INPUT_PATH = (
+#     DATA_DIR
+#     / "shsh_js"
+#     / "自动审核小时数据_标准单位_2026-07-01 00_00_00_2026-08-01 12_00_00.xlsx"
+# )
 
-EXTRACT_SCRIPT_KEY = "shsh_js"
-EXTRACT_OUTPUT_FOLDER = "shsh_js"
+# EXTRACT_SCRIPT_KEY = "shsh_js"
+# EXTRACT_OUTPUT_FOLDER = "shsh_js"
 
 # Abnormal-high event workbook to traverse. This must point to a concrete Excel
 # file with an `abnormal_high_records` sheet, not just a directory.
-# INPUT_FILE_PATH = ABNORMAL_DIR / "abnormal_high_monitor_data_jjj_567.xlsx"
-# MONITOR_INPUT_PATH = (
-#     DATA_DIR / "jjj" / "2026年小时数据" / "567月小时数据_标准单位_汇总.xlsx"
-# )
-# EXTRACT_SCRIPT_KEY = "jjj"
-# EXTRACT_OUTPUT_FOLDER = ""
+INPUT_FILE_PATH = ABNORMAL_DIR / "abnormal_high_monitor_data_jjj_8_special.xlsx"
+MONITOR_INPUT_PATH = DATA_DIR / "jjj" / "2026年小时数据" / "8月小时数据_指定污染物.xlsx"
+EXTRACT_SCRIPT_KEY = "jjj"
+EXTRACT_OUTPUT_FOLDER = ""
 
 
 # =========================
