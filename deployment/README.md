@@ -183,3 +183,15 @@ production epoch configuration:
 ```bash
 sudo deployment/run_acceptance_test.sh full historical_test_input.json
 ```
+
+After acceptance passes, create the client delivery directory with one command:
+
+```bash
+chmod +x deployment/export_delivery_bundle.sh
+sudo deployment/export_delivery_bundle.sh 1.0.0
+```
+
+The resulting `deployment_artifacts/delivery/source-inversion-1.0.0-linux-amd64/`
+directory contains the compressed Docker image, SHA-256 checksum, manifest,
+runtime Compose/environment files, client deployment instructions, and API
+protocol examples. It contains no repository source.
