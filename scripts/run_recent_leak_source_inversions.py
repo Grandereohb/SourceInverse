@@ -54,7 +54,7 @@ TRAVERSE_DIRECTION = "backward"
 # START_TRAVERSE_TIME:
 # - empty string: start from latest leak for "backward", earliest leak for "forward".
 # - "YYYY-MM-DD HH:MM:SS": start traversing from this time.
-START_TRAVERSE_TIME = "2026-07-20 00:00:00"
+START_TRAVERSE_TIME = ""
 
 # POLLUTANT_CONTAINS:
 # - empty string: include all pollutants.
@@ -380,8 +380,12 @@ def run_step(command: list[str], log_path: Path) -> None:
             env=env,
         )
     if proc.returncode != 0:
+        log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        log_tail = "\n".join(log_text.splitlines()[-80:])
         raise RuntimeError(
-            f"Command failed with exit code {proc.returncode}: {command}"
+            f"Command failed with exit code {proc.returncode}: {command}\n"
+            f"Log: {log_path}\n"
+            f"--- log tail ---\n{log_tail}"
         )
 
 

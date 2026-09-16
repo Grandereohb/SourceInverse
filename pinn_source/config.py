@@ -1,3 +1,9 @@
+import os
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 # =========================
 # Data Paths
 # =========================
@@ -16,7 +22,10 @@ FIELD_MODE = "recurrent_pde"
 # =========================
 # Output
 # =========================
-OUTPUT_DIR = r"C:\Document\phd\SourceInverse\SourceInverse\result"
+OUTPUT_DIR = os.environ.get(
+    "PINN_OUTPUT_DIR",
+    str(PROJECT_ROOT / "result"),
+)
 TARGET_POLLUTANT = "乙烯"
 MAKE_PLOTS = True
 

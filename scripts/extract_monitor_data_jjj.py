@@ -33,7 +33,9 @@ TARGET_POLLUTANT = '氨'
 # Leave empty to keep the old behavior: average wind from all station files.
 WIND_STATION_NAME = 'H5站点（淮河道区域点位）'
 # SITES_FILE_PATH: workbook containing current station location information.
-SITES_FILE_PATH = r"data\jjj\2026年小时数据\当前数据点位信息.xlsx"
+SITES_FILE_PATH = (
+    DATA_JJJ_DIR / "2026年小时数据" / "当前数据点位信息.xlsx"
+)
 
 # OUTPUT_FOLDER:
 # - empty string: save directly into data/jjj/
