@@ -24,6 +24,13 @@ ALLOW_MISSING_POLLUTANTS = False
 # ========================================================================
 
 TIME_COLUMN = "时间"
+WIND_SPEED_COLUMN = "风速"
+WIND_DIRECTION_COLUMN = "风向"
+PRESERVED_COLUMNS = {
+    TIME_COLUMN,
+    WIND_SPEED_COLUMN,
+    WIND_DIRECTION_COLUMN,
+}
 SUPPORTED_SUFFIXES = {".xlsx", ".xlsm"}
 UNIT_SUFFIX_PATTERN = re.compile(
     r"\s*[\(（]\s*"
@@ -114,6 +121,7 @@ def filter_excel_pollutants(
     validate_paths(input_file, output_file)
     requested = clean_pollutant_inputs(pollutants)
     requested_keys = {name: pollutant_name_keys(name) for name in requested}
+    preserved_names = {normalize_name(name) for name in PRESERVED_COLUMNS}
 
     keep_vba = input_file.suffix.lower() == ".xlsm"
     workbook = load_workbook(input_file, keep_vba=keep_vba)
@@ -126,9 +134,11 @@ def filter_excel_pollutants(
         has_time_column = False
         for column_index in range(1, worksheet.max_column + 1):
             header = worksheet.cell(row=1, column=column_index).value
-            if normalize_name(header) == normalize_name(TIME_COLUMN):
+            normalized_header = normalize_name(strip_unit_suffix(header))
+            if normalized_header in preserved_names:
                 keep_columns.add(column_index)
-                has_time_column = True
+                if normalized_header == normalize_name(TIME_COLUMN):
+                    has_time_column = True
                 continue
 
             header_keys = pollutant_name_keys(header)
@@ -183,8 +193,8 @@ def filter_excel_pollutants(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Retain only the time column and specified pollutant columns in every "
-            "worksheet of a monitoring workbook."
+            "Retain the time, wind speed, wind direction, and specified pollutant "
+            "columns in every worksheet of a monitoring workbook."
         )
     )
     parser.add_argument(
