@@ -238,9 +238,12 @@ def build_concentration_and_wind_tables(
         station_all = pd.concat(
             concentration_by_station[station_name], ignore_index=True
         )
+        station_all[station_name] = pd.to_numeric(
+            station_all[station_name], errors="coerce"
+        )
         station_all = (
             station_all.groupby(TIME_COLUMN, as_index=False)[station_name]
-            .mean(numeric_only=True)
+            .mean()
             .sort_values(TIME_COLUMN)
             .reset_index(drop=True)
         )
