@@ -164,3 +164,22 @@ Nuitka compilation raises the cost of recovering implementation details but is
 not absolute protection against a privileged host administrator. Keep the
 builder stage and repository on a trusted server, and deliver only the final
 runtime image archive, checksum, runtime Compose file, and environment template.
+
+### One-command acceptance test
+
+After the protected image is built, run a short CPU acceptance test from the
+repository root. The script starts isolated API and callback containers, uses a
+random localhost port, samples resource use, polls the job, downloads the result,
+and saves all job files and logs under `deployment_runs/`:
+
+```bash
+chmod +x deployment/run_acceptance_test.sh
+sudo deployment/run_acceptance_test.sh 50 historical_test_input.json
+```
+
+Use `full` instead of a number to omit the test epoch override and run the
+production epoch configuration:
+
+```bash
+sudo deployment/run_acceptance_test.sh full historical_test_input.json
+```
