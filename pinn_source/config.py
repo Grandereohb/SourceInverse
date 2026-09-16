@@ -1,9 +1,11 @@
 # =========================
 # Data Paths
 # =========================
-SITE_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/shsh_js/sites.xlsx'
-CONC_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/shsh_js/concentration.xlsx'
-WIND_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/shsh_js/wind.xlsx'
+SITE_PATH = "C:/Document/phd/SourceInverse/SourceInverse/data/shsh_js/sites.xlsx"
+CONC_PATH = (
+    "C:/Document/phd/SourceInverse/SourceInverse/data/shsh_js/concentration.xlsx"
+)
+WIND_PATH = "C:/Document/phd/SourceInverse/SourceInverse/data/shsh_js/wind.xlsx"
 # =========================
 # Model / Device
 # =========================
@@ -15,7 +17,7 @@ FIELD_MODE = "recurrent_pde"
 # Output
 # =========================
 OUTPUT_DIR = r"C:\Document\phd\SourceInverse\SourceInverse\result"
-TARGET_POLLUTANT = '乙烯'
+TARGET_POLLUTANT = "乙烯"
 MAKE_PLOTS = True
 
 # =========================
@@ -31,7 +33,7 @@ WIND_SCALE = 0.25
 # =========================
 # Training
 # =========================
-EPOCHS = 5000
+EPOCHS = 2500
 LR = 1e-3
 LOSS_W_DATA = 1.0
 MAX_GRAD_NORM = 10.0
