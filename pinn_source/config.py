@@ -7,11 +7,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # =========================
 # Data Paths
 # =========================
-SITE_PATH = "C:/Document/phd/SourceInverse/SourceInverse/data/shsh_js/sites.xlsx"
-CONC_PATH = (
-    "C:/Document/phd/SourceInverse/SourceInverse/data/shsh_js/concentration.xlsx"
-)
-WIND_PATH = "C:/Document/phd/SourceInverse/SourceInverse/data/shsh_js/wind.xlsx"
+SITE_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/sites.xlsx'
+CONC_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/concentration.xlsx'
+WIND_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/wind.xlsx'
 # =========================
 # Model / Device
 # =========================
@@ -26,7 +24,7 @@ OUTPUT_DIR = os.environ.get(
     "PINN_OUTPUT_DIR",
     str(PROJECT_ROOT / "result"),
 )
-TARGET_POLLUTANT = "乙烯"
+TARGET_POLLUTANT = '苯'
 MAKE_PLOTS = True
 
 # =========================

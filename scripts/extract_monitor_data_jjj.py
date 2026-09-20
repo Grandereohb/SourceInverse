@@ -21,17 +21,17 @@ DEFAULT_SITES_NAME = "sites.xlsx"
 # =========================
 # INPUT_FILE_PATH: combined JJJ workbook with one station per sheet. Generate it
 # first with scripts/combine_jjj_hourly_monitor_workbooks.py.
-INPUT_FILE_PATH = 'data/jjj/2026年小时数据/567月小时数据_标准单位_汇总.xlsx'
+INPUT_FILE_PATH = 'data/jjj/2026年小时数据/8月小时数据_指定污染物.xlsx'
 # START_TIME / END_TIME: inclusive extraction time range.
-START_TIME = '2026-05-03 19:00:00'
-END_TIME = '2026-05-04 07:00:00'
+START_TIME = '2026-09-14 10:00:00'
+END_TIME = '2026-09-15 10:00:00'
 # TARGET_POLLUTANT: pollutant to extract. It may be either the bare pollutant
 # name, such as "非甲烷总烃", or the full Excel column name, such as
 # "非甲烷总烃(μg/m³)".
-TARGET_POLLUTANT = '氨'
+TARGET_POLLUTANT = '苯'
 # WIND_STATION_NAME: use this station's wind direction/speed to build wind.xlsx.
 # Leave empty to keep the old behavior: average wind from all station files.
-WIND_STATION_NAME = 'H5站点（淮河道区域点位）'
+WIND_STATION_NAME = 'H3站点（海河道区域点位）'
 # SITES_FILE_PATH: workbook containing current station location information.
 SITES_FILE_PATH = (
     DATA_JJJ_DIR / "2026年小时数据" / "当前数据点位信息.xlsx"
