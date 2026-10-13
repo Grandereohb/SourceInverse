@@ -13,9 +13,58 @@ WIND_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/wind.xlsx'
 # =========================
 # Model / Device
 # =========================
-MODEL_NAME = "pinn"
 DEVICE = "auto"  # "auto", "cpu", or "cuda"
 FIELD_MODE = "recurrent_pde"
+
+# Single algorithm selector; both modes use the shared models.pinn.PINN backend.
+# Set to "ia_vpdi" to switch both direct and batch runs to variable projection.
+# PINN_INVERSION_MODE overrides this value; joint_adam remains the default.
+INVERSION_MODE = "joint_adam"  # "joint_adam" or "ia_vpdi"
+
+# =========================
+# IA-VPDI (Experimental)
+# =========================
+IA_VP_Q_BASIS_COUNT = 0  # 0 selects 3-5 basis functions from event length
+IA_VP_Q_BASIS_TYPE = "hat"
+IA_VP_RESPONSE_BATCH_SIZE = 8  # 1 retains the serial reference; no Q/search change
+IA_VP_JACOBIAN_BATCH_SIZE = 16  # diagnostic VJP rows; 1 retains serial gradients
+IA_VP_TIMING_ENABLED = True
+IA_VP_Q_LAYOUT_STRATEGY = "uniform"  # opt-in: local_templates (clock-only hat layouts)
+IA_VP_Q_UPPER_BOUND = float("inf")  # opt-in model-unit amplitude bound
+IA_VP_Q_KNOTS = None  # optional normalized times; fixed during refinement
+IA_VP_SEARCH_STEP_M = 500.0
+IA_VP_TOP_K = 3
+IA_VP_START_STRATEGY = "score"  # opt-in "spatial_diverse"; baseline unchanged
+IA_VP_START_MIN_DISTANCE_M = 1000.0  # relaxed if too few distinct neighborhoods
+IA_VP_DIFFUSION_SCALE_SEEDS = (0.5, 1.0, 2.0)
+IA_VP_DIFFUSION_RATIO_SEEDS = (1.0, 3.0)
+IA_VP_OUTER_STEPS = 200
+IA_VP_OUTER_LR = 1.0e-2
+IA_VP_OUTER_PATIENCE = 30
+IA_VP_OUTER_MIN_DELTA = 1.0e-8
+IA_VP_MAX_GRAD_NORM = 10.0
+IA_VP_ACTIVE_Q_TOL = 1.0e-8
+IA_VP_INFORMATION_RCOND = 1.0e-10
+IA_VP_INFORMATION_CONDITION_MAX = 1.0e8
+IA_VP_LOCALIZATION_RADIUS_LIMIT_M = (
+    None  # diagnostic only; None uses search-domain diagonal
+)
+IA_VP_BOUNDARY_MARGIN_M = 250.0
+IA_VP_REPORT_SCORE_TOLERANCES = (
+    0.01,
+    0.05,
+    0.10,
+)  # sampled MSE sets, not confidence levels
+IA_VP_SENSOR_RECOMMENDATION_ENABLED = False
+IA_VP_SENSOR_GRID_STEP_M = 500.0
+IA_VP_SENSOR_TOP_K = 5
+IA_VP_SENSOR_MIN_DISTANCE_M = 250.0
+
+# Optional wind-aligned diffusion tensor. Disabled by default so the current
+# isotropic solver remains unchanged.
+ENABLE_ANISOTROPIC_DIFFUSION = False
+D_PARALLEL_MIN = 1.0  # m^2/s
+D_PERP_MIN = 1.0  # m^2/s
 
 # =========================
 # Output
@@ -62,6 +111,13 @@ SOURCE_INIT_PEAK_VALUE = (
     "raw"  # "raw" uses observed high-value peak, "fit" uses residual peak
 )
 SIGMA_SRC = 0.05
+SIGMA_SRC_M = None  # optional Gaussian standard deviation in meters
+RECURRENT_SOURCE_MODE = "gaussian"  # legacy; opt-in "cell_gaussian" or "point"
+RECURRENT_DIFFUSION_SOLVER = (
+    "gaussian"  # opt-in "tensor_semigroup"; "implicit" is scalar only
+)
+RECURRENT_TRANSPORT_SOLVER = "grid"  # opt-in full-space "gaussian_parcels"
+RECURRENT_PARCEL_SUBDIVISIONS = 64  # release quadrature, independent of spatial grid
 D_MIN_PHYS = 1.0  # m^2/s
 
 # =========================
@@ -76,6 +132,7 @@ RECURRENT_MAX_SUBSTEPS = 3
 RECURRENT_SOURCE_SCALE = 1.0
 RECURRENT_DECAY = 0.50  # 1/hour
 RECURRENT_INITIAL_RELEASE_FRACTION = 1.0
+RECURRENT_SOURCE_DECAY_INTEGRATOR = "legacy"  # opt-in: "exponential_linear"
 
 # =========================
 # Source Strength Q(t)

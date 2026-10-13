@@ -87,6 +87,11 @@ Important environment variables:
 | `SOURCE_INVERSION_CALLBACK_TIMEOUT_SECONDS` | `30` | Callback timeout per attempt |
 | `SOURCE_INVERSION_CALLBACK_RETRY_DELAYS_SECONDS` | `0,60,300` | Callback retry delays |
 | `SOURCE_INVERSION_MAKE_PLOTS` | `0` | Generate optional plots and GIFs |
+| `SOURCE_INVERSION_INVERSION_MODE` | `joint_adam` | Select `joint_adam` or `ia_vpdi` |
+| `SOURCE_INVERSION_IA_VP_SEARCH_STEP_M` | `500` | IA-VPDI coarse candidate spacing in metres |
+| `SOURCE_INVERSION_IA_VP_TOP_K` | `3` | Number of coarse candidates continuously refined |
+| `SOURCE_INVERSION_IA_VP_OUTER_STEPS` | `200` | Maximum envelope-gradient refinement steps |
+| `SOURCE_INVERSION_IA_VP_SENSOR_RECOMMENDATION` | `0` | Enable optional information-only sensor recommendations |
 | `SOURCE_INVERSION_RANDOM_SEED` | `0` | Algorithm random seed |
 | `SOURCE_INVERSION_TEST_EPOCHS` | unset | Test-only training override |
 

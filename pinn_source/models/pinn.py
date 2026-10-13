@@ -12,6 +12,8 @@ class PINN(nn.Module):
 
         # Learnable physical parameters
         self.rawD = nn.Parameter(torch.tensor(0.0))
+        self.rawD_perp = nn.Parameter(torch.tensor(0.0))
+        self.rawD_parallel_delta = nn.Parameter(torch.tensor(-2.0))
         self.logQ = nn.Parameter(torch.tensor(0.0))  # baseline source strength
         self.raw_bg_scale = nn.Parameter(torch.tensor(-2.0))
         self.raw_source_bias = nn.Parameter(torch.tensor(-2.0))
@@ -36,6 +38,8 @@ class PINN(nn.Module):
         self.register_buffer("q_segment_breaks", torch.empty(0))
         self.register_buffer("q_regularization_times", torch.empty(0))
         self.register_buffer("q_time_grid", torch.empty(0))
+        self.register_buffer("external_q_time_grid", torch.empty(0))
+        self.register_buffer("external_q_values", torch.empty(0))
         self.register_buffer("transport_times", torch.empty(0))
         self.register_buffer("transport_u", torch.empty(0))
         self.register_buffer("transport_v", torch.empty(0))
@@ -79,6 +83,13 @@ class PINN(nn.Module):
     def D(self):
         return torch.nn.functional.softplus(self.rawD) + 1e-6
 
+    def anisotropic_D(self):
+        d_perp = torch.nn.functional.softplus(self.rawD_perp) + 1e-6
+        d_parallel = d_perp + torch.nn.functional.softplus(
+            self.rawD_parallel_delta
+        )
+        return d_parallel, d_perp
+
     def source_xy(self, t=None):
         if t is not None:
             if t.dim() == 1:
@@ -87,6 +98,14 @@ class PINN(nn.Module):
         return self.xs, self.ys
 
     def Q(self, t=None):
+        if self.q_mode == "external":
+            if self.external_q_values.numel() == 0:
+                raise RuntimeError("External Q mode has no configured values.")
+            if t is None:
+                return torch.mean(self.external_q_values)
+            if t.dim() == 1:
+                t = t.view(-1, 1)
+            return self._interpolate_external_q(t)
         if t is None:
             return torch.exp(self.logQ)
         if t.dim() == 1:
@@ -104,6 +123,26 @@ class PINN(nn.Module):
         if self.q_min is not None or self.q_max is not None:
             q = torch.clamp(q, min=self.q_min, max=self.q_max)
         return q
+
+    def _interpolate_external_q(self, t):
+        t_grid = self.external_q_time_grid.to(
+            device=t.device, dtype=t.dtype
+        ).view(-1)
+        q_grid = self.external_q_values.to(device=t.device, dtype=t.dtype).view(-1)
+        if t_grid.numel() == 1:
+            return q_grid[0].expand_as(t)
+
+        t_flat = t.reshape(-1).contiguous()
+        idx_hi = torch.bucketize(t_flat, t_grid)
+        idx_hi = torch.clamp(idx_hi, min=1, max=t_grid.numel() - 1)
+        idx_lo = idx_hi - 1
+        t_lo = t_grid[idx_lo]
+        t_hi = t_grid[idx_hi]
+        q_lo = q_grid[idx_lo]
+        q_hi = q_grid[idx_hi]
+        alpha = (t_flat - t_lo) / torch.clamp(t_hi - t_lo, min=1e-6)
+        alpha = torch.clamp(alpha, min=0.0, max=1.0)
+        return (q_lo + alpha * (q_hi - q_lo)).view_as(t)
 
     def _interpolate_logq_time(self, t):
         t_grid = self.q_time_grid.to(device=t.device, dtype=t.dtype).view(-1)
@@ -153,6 +192,26 @@ class PINN(nn.Module):
         self.logQ_segments = None
         self.logQ_time = nn.Parameter(torch.zeros(q_times.numel()))
         self.q_time_grid = q_times
+        self.q_regularization_times = q_times.view(-1, 1)
+
+    def configure_external_q(self, t_values, q_values):
+        q_times = torch.as_tensor(t_values, dtype=torch.float32).view(-1)
+        q_values = torch.as_tensor(q_values, dtype=torch.float32).view(-1)
+        if q_times.numel() == 0 or q_times.numel() != q_values.numel():
+            raise ValueError("External Q times and values must be nonempty and aligned.")
+        if not bool(torch.all(torch.isfinite(q_times))) or not bool(
+            torch.all(torch.isfinite(q_values))
+        ):
+            raise ValueError("External Q times and values must be finite.")
+        if bool(torch.any(q_values < 0.0)):
+            raise ValueError("External Q values must be nonnegative.")
+        if q_times.numel() > 1 and not bool(torch.all(q_times[1:] > q_times[:-1])):
+            raise ValueError("External Q times must be strictly increasing.")
+        self.q_mode = "external"
+        self.logQ_segments = None
+        self.logQ_time = None
+        self.external_q_time_grid = q_times
+        self.external_q_values = q_values
         self.q_regularization_times = q_times.view(-1, 1)
 
     def configure_transport_history(self, t_values, u_values, v_values):

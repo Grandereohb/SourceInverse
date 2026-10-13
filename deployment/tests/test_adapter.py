@@ -98,6 +98,13 @@ class AdapterTests(unittest.TestCase):
                 },
                 "is_reasonable": True,
                 "warnings": [],
+                "inversion_mode": "ia_vpdi",
+                "ia_vpdi": {
+                    "profile_information": {
+                        "status": "identifiable",
+                        "warnings": [],
+                    }
+                },
             }
             (case_dir / "result_quality_report.json").write_text(
                 json.dumps(report, ensure_ascii=False), encoding="utf-8"
@@ -115,6 +122,11 @@ class AdapterTests(unittest.TestCase):
             )
             self.assertEqual(output["release_strength"][0]["value"], 2.5)
             self.assertEqual(output["fields"][0]["points"][0]["concentration"], 3.5)
+            self.assertEqual(output["quality"]["inversion_mode"], "ia_vpdi")
+            self.assertEqual(
+                output["quality"]["identifiability"]["status"],
+                "identifiable",
+            )
             output_path = delivery / "output.json"
             output_path.write_text(json.dumps(output), encoding="utf-8")
             (job_dir / "job.json").write_text(

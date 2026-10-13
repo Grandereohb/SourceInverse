@@ -44,6 +44,7 @@ RUN python -m nuitka \
         --include-module=deployment.worker_entry \
         --include-module=pipeline \
         --include-module=models.pinn \
+        --include-package=scipy \
         --include-package-data=matplotlib \
         /build/source_inversion_launcher.py \
     && test -x /build/nuitka-output/source_inversion_launcher.dist/source-inversion

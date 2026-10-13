@@ -86,6 +86,14 @@ but clients should parse the list without assuming a permanent grid size.
 `release_strength.value` is currently the learned model Q value with unit
 `model_unit`, not a calibrated physical mass flow such as `kg/h` or `g/s`.
 
+`quality.inversion_mode` identifies the algorithm used. When the mode is
+`ia_vpdi`, `quality.identifiability` contains the Schur-profiled source
+information rank, condition and a local linearized nominal-95% location ellipse
+when available. This is conditional on the fitted model, active Q set and noise
+assumptions; it is not a calibrated confidence region or verified location
+accuracy. Missing ellipses and diagnostic warnings must be retained. For `joint_adam`,
+`quality.identifiability` is `null`.
+
 ## Validation And Errors
 
 - IDs and pollutant/unit names cannot be blank.

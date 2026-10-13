@@ -73,6 +73,7 @@ def build_output_payload(
     report_path = case_dir / "result_quality_report.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     exports = report["inversion_text_outputs"]
+    ia_vpdi = report.get("ia_vpdi") or {}
 
     strength_paths = [Path(path) for path in exports.get("source_strength_paths", [])]
     strength_path = next((path for path in strength_paths if path.exists()), None)
@@ -102,6 +103,8 @@ def build_output_payload(
         "quality": {
             "is_reasonable": bool(report.get("is_reasonable", False)),
             "warnings": [str(item) for item in report.get("warnings", [])],
+            "inversion_mode": str(report.get("inversion_mode", "joint_adam")),
+            "identifiability": ia_vpdi.get("profile_information"),
         },
         "completed_at": datetime.now().strftime(TIME_FORMAT),
         "algorithm_version": _algorithm_version(repo_root),

@@ -1,90 +1,152 @@
-# PINN Source Inversion
+# Source Inversion
 
-This folder contains a modularized PINN-based source inversion pipeline. The entrypoint remains a single command.
+## Run And Select An Algorithm
 
-## Quick Start
-
-Run from the project root:
+From the repository root:
 
 ```bash
 python pinn_source/pinn_source_pinn.py
+python scripts/run_recent_leak_source_inversions.py
 ```
+
+Edit input paths and settings in `pinn_source/config.py`. The single selector
+`INVERSION_MODE` accepts `joint_adam` (established baseline) or `ia_vpdi`.
+The current local choice may differ from the deployment default. Both modes use
+`models.pinn.PINN` as the parameter container; there is no `MODEL_NAME` switch.
+`PINN_INVERSION_MODE` overrides both config and `run(inversion_mode=...)`.
+
+Joint Adam optimizes position, diffusion and Q together. IA-VPDI profiles
+nonnegative low-dimensional hat Q coefficients with SciPy NNLS, searches source
+and diffusion candidates, and refines the profiled objective. IA-VPDI enables
+constrained wind-aligned anisotropic diffusion internally. Its Q settings replace
+`Q_MODE`; its search budget replaces joint Adam epochs.
+
+All valid observations participate in IA-VPDI fitting and source selection.
+Retired crossfit, anchor folds and station/time withholding are not supported.
+Independent external-case evaluation is a separate task. The recurrent mode
+uses explicit physical transport, not a classical neural PDE-residual PINN.
 
 ## Configuration
 
-Edit paths and hyperparameters in:
+| Setting / environment override | Purpose |
+| --- | --- |
+| `SITE_PATH`, `CONC_PATH`, `WIND_PATH` | Station coordinates, concentrations and wind Excel inputs |
+| `DEVICE` / `PINN_DEVICE` | auto, cpu or cuda |
+| `INVERSION_MODE` / `PINN_INVERSION_MODE` | joint_adam or ia_vpdi |
+| `IA_VP_Q_BASIS_COUNT` | 0 selects 3-5 hats from event length |
+| `IA_VP_Q_KNOTS` | Optional fixed normalized-time knots |
+| `IA_VP_Q_LAYOUT_STRATEGY` / `PINN_IA_VP_Q_LAYOUT_STRATEGY` | uniform; opt-in local_templates |
+| `IA_VP_Q_UPPER_BOUND` / `PINN_IA_VP_Q_UPPER_BOUND` | Nonnegative coefficient cap in model units; infinity by default |
+| `IA_VP_SEARCH_STEP_M` / `PINN_IA_VP_SEARCH_STEP_M` | Coarse candidate spacing |
+| `IA_VP_TOP_K` / `PINN_IA_VP_TOP_K` | Refinement starts |
+| `IA_VP_OUTER_STEPS` / `PINN_IA_VP_OUTER_STEPS` | Maximum refinement steps |
+| `IA_VP_START_STRATEGY` / `PINN_IA_VP_START_STRATEGY` | score or spatial_diverse |
+| `IA_VP_RESPONSE_BATCH_SIZE` / `PINN_IA_VP_RESPONSE_BATCH_SIZE` | Q response batch size (8; 1 restores serial) |
+| `IA_VP_JACOBIAN_BATCH_SIZE` / `PINN_IA_VP_JACOBIAN_BATCH_SIZE` | Diagnostic VJP batch size (16; 1 restores serial) |
+| `IA_VP_TIMING_ENABLED` / `PINN_IA_VP_TIMING` | Synchronized component timing; 0 disables |
+| `RECURRENT_TRANSPORT_SOLVER` / `PINN_TRANSPORT_SOLVER` | grid or opt-in gaussian_parcels |
+| `SIGMA_SRC_M` / `PINN_SIGMA_SRC_M` | Optional source width in metres |
+| `RECURRENT_SOURCE_MODE` / `PINN_RECURRENT_SOURCE_MODE` | gaussian, cell_gaussian or point |
+| `RECURRENT_DIFFUSION_SOLVER` / `PINN_RECURRENT_DIFFUSION_SOLVER` | gaussian, tensor_semigroup or scalar-only implicit |
+| `RECURRENT_SOURCE_DECAY_INTEGRATOR` / `PINN_SOURCE_DECAY_INTEGRATOR` | legacy or exponential_linear (grid only) |
+| `RECURRENT_PARCEL_SUBDIVISIONS` / `PINN_PARCEL_SUBDIVISIONS` | Parcel release-time quadrature (64) |
+| `TRAIN_ON_RESIDUAL` / `PINN_TRAIN_ON_RESIDUAL` | Background-subtracted fitting; 0 fits raw data |
+| `BASELINE_MODE` / `PINN_BASELINE_MODE` | median, q25 or q40 background estimate |
 
-- `pinn_source/config.py`
+Grid controls include `RECURRENT_GRID_NX/NY`, adaptive substeps and their cap.
+Wind uses meteorological direction-from when `WIND_DIR_IS_FROM=True`; smoothing
+operates on vectors. Velocity is m/s, diffusivity m²/s and decay 1/hour before
+normalization. `WIND_SCALE` is an effective-transport factor, not a unit conversion.
+Zero concentration is valid; missing required station/wind values are excluded.
 
-Key settings:
-- `SITE_PATH`, `CONC_PATH`, `WIND_PATH`
-- `WIND_DIR_IS_FROM`
-- `FIELD_MODE`
-- `EPOCHS`, `LR`
-- Recurrent plume controls such as `RECURRENT_GRID_NX`,
-  `RECURRENT_SUBSTEPS`, `RECURRENT_ADAPTIVE_SUBSTEPS`,
-  `RECURRENT_MAX_ADVECTION_CELLS`, `RECURRENT_MAX_SUBSTEPS`, and
-  `RECURRENT_INITIAL_RELEASE_FRACTION`
+## Transport Choices And Limits
 
-## Inversion Text Outputs
+- Grid uses linear bilinear advection with absorbing zero-exterior boundaries.
+  Gaussian diffusion is the legacy default. Scalar implicit diffusion and the
+  wind-aligned positive tensor semigroup are optional alternatives.
+- Tensor semigroup plans preserve small-step tensor covariance and positivity,
+  with omitted Poisson probability at most 1e-10 per plan. Boundary loss remains
+  explicit. Stencil selection is piecewise differentiable; extreme anisotropy
+  requiring more than 128 cells fails explicitly.
+- Exponential-linear source/decay weights integrate linear Q exactly with decay
+  alone. They do not make endpoint spatial transport exact. Release knots must
+  be included in the integration schedule.
+- Full-space Gaussian parcels integrate interval wind/tensor histories for each
+  released parcel. Release quadrature is separate from raster resolution/CFL.
+  Fitting, information, GIF and TXT fields share this operator. It requires a
+  single fixed finite-width Gaussian source, not a point/moving source or initial
+  raster field. Grid diffusion/source-decay switches do not apply to parcels.
+- Optional local temporal layouts depend only on clocks, not concentrations.
+  Every candidate/layout re-estimates Q. Selected-layout information excludes
+  discrete layout uncertainty; neither search nor refinement guarantees a
+  global optimum.
 
-Every recurrent-PDE run exports database-friendly TXT files twice: under the
-case result directory and under `<OUTPUT_DIR>/溯源输出/<case-name>/`.
+The unused nonlinear limited-remap/pulse-scalar experiment has been removed:
+it cannot support additive response matrices. Q-linear transport tests remain.
 
-- `污染源点坐标.txt`: one tab-separated `longitude, latitude` row.
-- `源强.txt`: one tab-separated `time, model source strength` row per whole hour.
-- `浓度场/浓度场_YYYYMMDD_hHH.txt`: one row per recurrent grid cell with
-  tab-separated `longitude, latitude, predicted_total_concentration` values.
+## Outputs And Interpretation
 
-Hourly fields are evaluated by the recurrent transport model at each whole
-clock hour in the event window. Concentration is plume contribution plus the
-time-interpolated baseline, matching the quantity displayed in `diffusion.gif`.
+Each case retains copied inputs, `result_quality_report.json` and
+`diagnostics.xlsx`. Optional plots include `station_timeseries.png`,
+`sites_source.png`, `source_confidence.png` and `diffusion.gif`.
 
-## Consolidated Diagnostics
+IA-VPDI report data are under `result_quality_report.json["ia_vpdi"]`.
+Candidate scores, refinements, trajectories and stability tables are workbook
+sheets, not duplicate standalone IA CSV/JSON files. Historical archives are
+unchanged; offline tools can read their older standalone report.
 
-Each case writes one `diagnostics.xlsx` workbook instead of separate diagnostic
-CSV files. Depending on the enabled model features, it contains these sheets:
+`溯源输出/` contains source longitude/latitude, one field TXT per whole hour
+(longitude, latitude, concentration), and `源强.txt` (timestamp, Q). Required
+copies also go to `<result_root>/溯源输出/<case>/`. Background addition follows
+`ADD_BASELINE_TO_VIZ`. Q is model-unit amplitude, not calibrated kg/h.
 
-- `q_time_series`
-- `q_segments`
-- `training`
-- `station_peaks`
-- `source_landscape`
+Local information removes active-Q and diffusion compensation directions.
+`structural_status` describes local rank/conditioning, not global uniqueness.
+`precision_assessment` compares the local ellipse with a diagnostic reference
+scale. Zero residual noise, active Q caps, boundary solutions and model mismatch
+limit interpretation. `sampled_profile_stability` reuses evaluated candidates;
+1/5/10% near-score sets are not calibrated confidence regions. The legacy source
+landscape holds other parameters fixed and is not a profiled IA landscape.
 
-The complete source-landscape metadata is embedded under `source_landscape` in
-`result_quality_report.json`. When landscape confidence is enabled, the single
-`source_confidence.png` combines stations, the trained source, the landscape
-best point, relative-probability regions, confidence contours, and loss
-contours.
+Low RMSE, a small ellipse or a plausible map location does not establish true
+source accuracy. Unbounded Q may compensate for weak/wrong-location response.
+Sensor recommendations are optional information-only diagnostics, not validated
+deployment gains. The background error floor is a diagnostic, not a new loss.
 
-## Module Layout
+## Observation Provenance
 
-- `config.py` - Paths and hyperparameters
-- `geo_utils.py` - DMS parsing, lat/lon conversions
-- `data_io.py` - Data loading and wind conversion
-- `models/` - PINN model definitions
-- `pipeline.py` - Training, filtering, and inference pipeline
-- `viz.py` - Plotting and diffusion animation
-- `pinn_source_pinn.py` - One-click entrypoint
+JJJ extraction writes an optional `concentration_quality.json` with original
+strings, numeric values, status codes, units, source rows and input hashes.
+Codes have unknown semantics; this does not filter measurements or certify them.
+Pipeline archives it only if its concentration hash matches. Missing/stale reports
+do not block training. Hash checks detect stale pairing, not malicious tampering.
 
-## Notes
+## Tests, Comparisons And Deployment
 
-- Wind direction uses meteorological convention when `WIND_DIR_IS_FROM = True`.
-- Zero concentration is treated as valid data; rows are dropped only when required
-  wind or station values are missing.
-- The default `FIELD_MODE = "recurrent_pde"` recursively advances a gridded plume
-  field through the observed wind sequence before sampling concentrations at
-  station locations.
-- Output includes copied input Excel files, source location, consolidated
-  diagnostics, station time-series plots, one source-confidence plot, and
-  `diffusion.gif`.
-
-## Model Selection
-
-Set the model in `pinn_source/config.py`:
-
-```python
-MODEL_NAME = "pinn"
+```bash
+python -m unittest discover -s tests
+python -m unittest discover -s deployment/tests
+python scripts/compare_historical_inversion_modes.py --output result/NEW_COMPARISON
+python scripts/benchmark_inversion_runtime.py --output result/NEW_BENCHMARK.json
 ```
 
-Add new models under `pinn_source/models/` and register them in `model_registry.py`.
+Historical comparison uses three predefined cases and different production
+objectives/Q parameterizations: it is not an optimizer-only ablation.
+`--audit-baseline OLD_RUN` replays archives; `--summarize-only` summarizes them.
+The benchmark measures serial/batched equivalence and timings; `--smoke` adds
+short reduced-budget flows. It does not prove full-budget speedup or localization.
+
+Timings are nested: do not sum every component. Kernel plans are shared only
+within fresh response calls, never reused across changed parameters/graphs.
+Forward counts are basis-response equivalents, not comparable physical work
+across different solvers.
+
+Older protected Docker images require rebuilding for new algorithms/dependencies.
+Current images use `SOURCE_INVERSION_INVERSION_MODE=joint_adam` by deployment
+default; change it to `ia_vpdi` in the runtime env and recreate the service.
+The runtime override takes precedence over compiled config.
+See `deployment/README.md` and `proto/API_PROTOCOL.md`.
+
+Core modules: `pipeline.py` (workflow), `field.py`/`gaussian_parcels.py`
+(transport), `variable_projection.py` (basis/responses/NNLS), `ia_vpdi.py`
+(search/information), `source_output.py` (TXT), `viz.py` (plots).

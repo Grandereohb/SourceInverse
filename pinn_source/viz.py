@@ -381,14 +381,16 @@ def diffusion_animation(
     v_frames = np.interp(t_frames_norm, t_w, v_w)
 
     with torch.no_grad():
+        parcel = getattr(model, "recurrent_transport_solver", "grid") == "gaussian_parcels"
         dense_fields = recurrent_plume_fields_at_times(
             model,
             sigma_src=sigma_src,
             t_values=t_frames_norm,
             u_values=u_frames,
             v_values=v_frames,
+            **({"x_values": (xs_lin-x0)/L, "y_values": (ys_lin-y0)/L} if parcel else {}),
         )
-        display_fields = F.interpolate(
+        display_fields = dense_fields if parcel else F.interpolate(
             dense_fields.unsqueeze(1),
             size=(ny, nx),
             mode="bilinear",

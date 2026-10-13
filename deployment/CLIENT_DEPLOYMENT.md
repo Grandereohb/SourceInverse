@@ -29,6 +29,11 @@ Edit `runtime.env` and replace `SOURCE_INVERSION_API_TOKEN`. Configure either
 `SOURCE_INVERSION_CALLBACK_ALLOWED_HOSTS` for the client's callback endpoint.
 Do not set `SOURCE_INVERSION_TEST_EPOCHS` in production.
 
+Keep `SOURCE_INVERSION_INVERSION_MODE=joint_adam` for the established baseline,
+or set it to `ia_vpdi` for the variable-projection inversion.
+`SOURCE_INVERSION_IA_VP_SEARCH_STEP_M` controls candidate spacing; smaller
+values improve spatial resolution but increase runtime.
+
 ## 3. Start and verify
 
 ```bash

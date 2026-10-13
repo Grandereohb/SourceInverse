@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -10,6 +11,8 @@ import pandas as pd
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(REPO_ROOT / "pinn_source"))
+from observation_quality import make_quality_record, write_quality_report, QUALITY_FILENAME
 DATA_JJJ_DIR = REPO_ROOT / "data" / "jjj"
 
 DEFAULT_CONCENTRATION_NAME = "concentration.xlsx"
@@ -51,6 +54,7 @@ LOCKED_OUTPUT_POLICY = "timestamp_folder"
 TIME_COLUMN = "时间"
 WIND_DIR_COLUMN = "风向"
 WIND_SPEED_COLUMN = "风速"
+SOURCE_ROW_COLUMN = "__source_excel_row__"
 
 
 def resolve_path(path: str | Path, base_dir: Path = REPO_ROOT) -> Path:
@@ -116,19 +120,29 @@ def station_name_matches(station_name: str, target_station_name: str | None) -> 
 
 
 def load_station_hourly_table(
-    workbook: pd.ExcelFile, sheet_name: str
+    workbook: pd.ExcelFile, sheet_name: str, include_source_rows: bool = False
 ) -> pd.DataFrame:
     table = pd.read_excel(workbook, sheet_name=sheet_name)
     table = table.loc[
         :, [pd.notna(column) and bool(str(column).strip()) for column in table.columns]
     ]
     table.columns = [str(column).strip() for column in table.columns]
+    if include_source_rows:
+        if SOURCE_ROW_COLUMN in table.columns:
+            raise ValueError(f"Reserved provenance column in source: {SOURCE_ROW_COLUMN}")
+        table[SOURCE_ROW_COLUMN] = table.index + 2
     table = table.dropna(how="all")
 
     if TIME_COLUMN not in table.columns:
         raise ValueError(
             f"Parsed station sheet does not contain '{TIME_COLUMN}': {sheet_name}"
         )
+
+    if include_source_rows:
+        unit_rows = table.loc[table[TIME_COLUMN].astype(str).str.strip() == "标准单位"]
+        table.attrs["source_units"] = ({str(column): str(unit_rows.iloc[0][column]).strip()
+            for column in table.columns if pd.notna(unit_rows.iloc[0][column])}
+            if not unit_rows.empty else {})
 
     table[TIME_COLUMN] = pd.to_datetime(
         table[TIME_COLUMN], errors="coerce", format="mixed"
@@ -174,6 +188,7 @@ def build_concentration_and_wind_tables(
     end_time: str | pd.Timestamp | None,
     pollutant: str,
     wind_station_name: str | None = None,
+    quality_records: list[dict] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
     concentration_by_station: dict[str, list[pd.DataFrame]] = {}
     wind_frames: list[pd.DataFrame] = []
@@ -186,37 +201,48 @@ def build_concentration_and_wind_tables(
     if not path.is_file():
         raise IsADirectoryError(f"Monitor input must be an Excel workbook: {path}")
 
-    workbook = pd.ExcelFile(path)
-    for sheet_name in workbook.sheet_names:
-        station_name = clean_station_name(sheet_name)
-        table = filter_time_range(
-            load_station_hourly_table(workbook, sheet_name),
-            start_time,
-            end_time,
-        )
-        if table.empty:
-            continue
+    with pd.ExcelFile(path) as workbook:
+        for sheet_name in workbook.sheet_names:
+            station_name = clean_station_name(sheet_name)
+            table = filter_time_range(
+                load_station_hourly_table(workbook, sheet_name, include_source_rows=quality_records is not None),
+                start_time,
+                end_time,
+            )
+            if table.empty:
+                continue
 
-        pollutant_col = find_column(list(table.columns), pollutant)
-        if pollutant_col is None:
-            missing_pollutant.append(station_name)
-        else:
-            station_df = table[[TIME_COLUMN, pollutant_col]].copy()
-            station_df[station_name] = station_df[pollutant_col].map(extract_numeric)
-            station_df = station_df[[TIME_COLUMN, station_name]]
-            concentration_by_station.setdefault(station_name, []).append(station_df)
-            if station_name not in station_names:
-                station_names.append(station_name)
+            pollutant_col = find_column(list(table.columns), pollutant)
+            if pollutant_col is None:
+                missing_pollutant.append(station_name)
+            else:
+                station_df = table[[TIME_COLUMN, pollutant_col]].copy()
+                station_df[station_name] = station_df[pollutant_col].map(extract_numeric)
+                if quality_records is not None:
+                    unit = table.attrs.get("source_units", {}).get(pollutant_col)
+                    for index, row in table.iterrows():
+                        raw = row[pollutant_col]
+                        number = station_df.loc[index, station_name]
+                        quality_records.append(make_quality_record(
+                            None if pd.isna(raw) else str(raw), None if pd.isna(number) else number,
+                            time=pd.Timestamp(row[TIME_COLUMN]).isoformat(sep=" "),
+                            station=station_name, pollutant=pollutant,
+                            source_sheet=sheet_name, source_column=pollutant_col,
+                            source_excel_row=int(row[SOURCE_ROW_COLUMN]), unit=unit))
+                station_df = station_df[[TIME_COLUMN, station_name]]
+                concentration_by_station.setdefault(station_name, []).append(station_df)
+                if station_name not in station_names:
+                    station_names.append(station_name)
 
-        if (
-            station_name_matches(station_name, wind_station_name)
-            and WIND_DIR_COLUMN in table.columns
-            and WIND_SPEED_COLUMN in table.columns
-        ):
-            wind_df = table[[TIME_COLUMN, WIND_DIR_COLUMN, WIND_SPEED_COLUMN]].copy()
-            wind_df["dir"] = wind_df[WIND_DIR_COLUMN].map(extract_numeric)
-            wind_df["sp"] = wind_df[WIND_SPEED_COLUMN].map(extract_numeric)
-            wind_frames.append(wind_df[[TIME_COLUMN, "dir", "sp"]])
+            if (
+                station_name_matches(station_name, wind_station_name)
+                and WIND_DIR_COLUMN in table.columns
+                and WIND_SPEED_COLUMN in table.columns
+            ):
+                wind_df = table[[TIME_COLUMN, WIND_DIR_COLUMN, WIND_SPEED_COLUMN]].copy()
+                wind_df["dir"] = wind_df[WIND_DIR_COLUMN].map(extract_numeric)
+                wind_df["sp"] = wind_df[WIND_SPEED_COLUMN].map(extract_numeric)
+                wind_frames.append(wind_df[[TIME_COLUMN, "dir", "sp"]])
 
     if not concentration_by_station:
         detail = (
@@ -340,7 +366,7 @@ def prepare_output_paths(out_dir: Path) -> tuple[Path, Path, Path]:
         out_dir / DEFAULT_WIND_NAME,
         out_dir / DEFAULT_SITES_NAME,
     )
-    locked_paths = [path for path in paths if output_file_is_locked(path)]
+    locked_paths = [path for path in (*paths, out_dir / QUALITY_FILENAME) if output_file_is_locked(path)]
     if not locked_paths:
         return paths
 
@@ -374,6 +400,7 @@ def extract_hourly_monitor_data(
     output_folder: str | None = None,
 ) -> tuple[Path, Path, Path]:
     out_dir = resolve_output_dir(output_folder)
+    quality_records = []
 
     concentration_df, wind_df, station_names = build_concentration_and_wind_tables(
         input_path=input_path,
@@ -381,6 +408,7 @@ def extract_hourly_monitor_data(
         end_time=end_time,
         pollutant=pollutant,
         wind_station_name=wind_station_name,
+        quality_records=quality_records,
     )
     sites_df = load_sites_table(sites_path, station_order=station_names)
 
@@ -389,6 +417,11 @@ def extract_hourly_monitor_data(
     write_excel(concentration_df, concentration_path)
     write_excel(wind_df, wind_path)
     write_excel(sites_df, sites_path_out)
+    quality_path = write_quality_report(quality_records, concentration_path, resolve_path(input_path),
+        pollutant=pollutant, start_time=str(start_time) if start_time is not None else None,
+        end_time=str(end_time) if end_time is not None else None,
+        numeric_parser="extract_monitor_data_jjj.extract_numeric (unchanged)")
+    print(f"Saved observation quality report: {quality_path}")
 
     return concentration_path, wind_path, sites_path_out
 

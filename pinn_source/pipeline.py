@@ -7,15 +7,43 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+from observation_quality import archive_quality_report
+from background import estimate_common_background, nonnegative_background_floor
 
 from config import (
     EPOCHS,
     LR,
     DOMAIN_PAD_M,
     WIND_DIR_IS_FROM,
-    MODEL_NAME,
     DEVICE,
     FIELD_MODE,
+    INVERSION_MODE,
+    IA_VP_Q_BASIS_COUNT,
+    IA_VP_Q_BASIS_TYPE,
+    IA_VP_Q_LAYOUT_STRATEGY,
+    IA_VP_Q_UPPER_BOUND,
+    IA_VP_Q_KNOTS,
+    IA_VP_SEARCH_STEP_M,
+    IA_VP_TOP_K,
+    IA_VP_START_STRATEGY,
+    IA_VP_START_MIN_DISTANCE_M,
+    IA_VP_DIFFUSION_SCALE_SEEDS,
+    IA_VP_DIFFUSION_RATIO_SEEDS,
+    IA_VP_OUTER_STEPS,
+    IA_VP_OUTER_LR,
+    IA_VP_OUTER_PATIENCE,
+    IA_VP_OUTER_MIN_DELTA,
+    IA_VP_MAX_GRAD_NORM,
+    IA_VP_ACTIVE_Q_TOL,
+    IA_VP_INFORMATION_RCOND,
+    IA_VP_INFORMATION_CONDITION_MAX,
+    IA_VP_LOCALIZATION_RADIUS_LIMIT_M,
+    IA_VP_BOUNDARY_MARGIN_M,
+    IA_VP_REPORT_SCORE_TOLERANCES,
+    IA_VP_SENSOR_RECOMMENDATION_ENABLED,
+    IA_VP_SENSOR_GRID_STEP_M,
+    IA_VP_SENSOR_TOP_K,
+    IA_VP_SENSOR_MIN_DISTANCE_M,
     OUTPUT_DIR,
     TARGET_POLLUTANT,
     MAKE_PLOTS,
@@ -23,8 +51,17 @@ from config import (
     WIND_SMOOTH_WINDOW,
     WIND_SMOOTH_LOW_SPEED_MPS,
     SIGMA_SRC,
+    SIGMA_SRC_M,
+    RECURRENT_SOURCE_MODE,
+    RECURRENT_DIFFUSION_SOLVER,
+    RECURRENT_TRANSPORT_SOLVER,
+    RECURRENT_PARCEL_SUBDIVISIONS,
+    RECURRENT_SOURCE_DECAY_INTEGRATOR,
     LOSS_W_DATA,
     D_MIN_PHYS,
+    ENABLE_ANISOTROPIC_DIFFUSION,
+    D_PARALLEL_MIN,
+    D_PERP_MIN,
     WIND_SCALE,
     Q_MODE,
     Q_SEGMENT_LENGTH,
@@ -101,7 +138,7 @@ from data_io import (
     get_concentration_target_pollutant,
     wind_dir_to_uv,
 )
-from model_registry import get_model
+from models.pinn import PINN
 from field import (
     field_components,
     concentration_from_components,
@@ -115,6 +152,13 @@ from q_parameterization import (
 )
 from source_landscape import compute_source_loss_landscape
 from source_output import export_hourly_concentration_text_outputs
+from ia_vpdi import (
+    compute_profile_information,
+    build_ia_vpdi_diagnostics,
+    recommend_sensor_locations,
+    run_ia_vpdi,
+)
+from variable_projection import generate_candidate_grid
 from transport_units import (
     normalize_decay_per_hour,
     normalize_diffusivity_m2s,
@@ -240,17 +284,30 @@ def _copy_training_inputs(output_dir, site_path, conc_path, wind_path):
         if source != destination.resolve():
             shutil.copy2(source, destination)
         copied_paths[output_name] = str(destination)
+    quality_status = archive_quality_report(conc_path, output_dir)
+    if quality_status != "absent":
+        print(f"Observation quality sidecar: {quality_status} (diagnostic only)")
     return copied_paths
 
 
-def _freeze_recurrent_unused_parameters(model):
+def _freeze_recurrent_unused_parameters(model, inversion_mode):
     frozen = []
     for name, param in model.named_parameters():
-        if (
+        freeze = (
             name.startswith("bg_net.")
             or name.startswith("plume_net.")
             or name in {"raw_bg_scale", "raw_source_bias"}
-        ):
+        )
+        if inversion_mode == "ia_vpdi":
+            freeze = freeze or name == "rawD" or name.startswith("q_net.") or name in {
+                "logQ", "logQ_time", "logQ_segments"
+            }
+        else:
+            freeze = freeze or (ENABLE_ANISOTROPIC_DIFFUSION and name == "rawD") or (
+                not ENABLE_ANISOTROPIC_DIFFUSION
+                and name in {"rawD_perp", "rawD_parallel_delta"}
+            )
+        if freeze:
             param.requires_grad_(False)
             frozen.append(name)
     return frozen
@@ -275,6 +332,44 @@ def _env_int(name, default):
     if value is None or not str(value).strip():
         return int(default)
     return int(value)
+
+
+def _current_diffusion_values(model, device, anisotropic=None):
+    d_parallel = None
+    d_perp = None
+    use_anisotropic = ENABLE_ANISOTROPIC_DIFFUSION if anisotropic is None else bool(anisotropic)
+    if use_anisotropic:
+        parallel_multiplier, perp_multiplier = model.anisotropic_D()
+        d_parallel_candidate = (
+            torch.tensor(
+                float(getattr(model, "recurrent_d_parallel_min_norm", 0.0)),
+                dtype=torch.float32,
+                device=device,
+            )
+            + parallel_multiplier
+            * float(getattr(model, "recurrent_d_scale_norm", 1.0))
+        )
+        d_perp = (
+            torch.tensor(
+                float(getattr(model, "recurrent_d_perp_min_norm", 0.0)),
+                dtype=torch.float32,
+                device=device,
+            )
+            + perp_multiplier
+            * float(getattr(model, "recurrent_d_scale_norm", 1.0))
+        )
+        d_parallel = torch.maximum(d_parallel_candidate, d_perp)
+        diffusion = 0.5 * (d_parallel + d_perp)
+    else:
+        diffusion = (
+            torch.tensor(
+                float(getattr(model, "recurrent_d_min_norm", 0.0)),
+                dtype=torch.float32,
+                device=device,
+            )
+            + model.D() * float(getattr(model, "recurrent_d_scale_norm", 1.0))
+        )
+    return diffusion, d_parallel, d_perp
 
 
 def _select_ablation_stations(sites, station_cols):
@@ -446,12 +541,26 @@ def run(
     make_plots=None,
     run_id=None,
     result_name_suffix=None,
+    inversion_mode=None,
 ):
     if random_seed is not None:
         np.random.seed(int(random_seed))
         torch.manual_seed(int(random_seed))
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(int(random_seed))
+
+    inversion_mode_actual = str(
+        os.environ.get("PINN_INVERSION_MODE", inversion_mode or INVERSION_MODE)
+    ).strip().lower()
+    if inversion_mode_actual not in {"joint_adam", "ia_vpdi"}:
+        raise ValueError(
+            "INVERSION_MODE must be 'joint_adam' or 'ia_vpdi', "
+            f"got {inversion_mode_actual!r}."
+        )
+    if inversion_mode_actual == "ia_vpdi" and FIELD_MODE != "recurrent_pde":
+        raise ValueError("ia_vpdi requires FIELD_MODE='recurrent_pde'.")
+    train_on_residual = _env_flag("PINN_TRAIN_ON_RESIDUAL", TRAIN_ON_RESIDUAL)
+    baseline_mode_actual = os.environ.get("PINN_BASELINE_MODE", BASELINE_MODE).strip().lower()
 
     conc = load_conc(conc_path)
     conc_target_pollutant = get_concentration_target_pollutant(conc)
@@ -512,15 +621,7 @@ def run(
         raise ValueError("No matching timestamps between concentration and wind data.")
 
     station_matrix = data[valid_stations].astype(float)
-    if TRAIN_ON_RESIDUAL:
-        if BASELINE_MODE == "q25":
-            baseline_series = station_matrix.quantile(0.25, axis=1)
-        elif BASELINE_MODE == "q40":
-            baseline_series = station_matrix.quantile(0.40, axis=1)
-        else:
-            baseline_series = station_matrix.median(axis=1)
-    else:
-        baseline_series = np.zeros(len(data), dtype=np.float64)
+    baseline_series = estimate_common_background(station_matrix, train_on_residual, baseline_mode_actual)
     baseline_vals = baseline_series.to_numpy(dtype=np.float64)
 
     # Keep only the main anomaly window if requested, with a small time padding on both ends.
@@ -576,7 +677,7 @@ def run(
             if st not in data.columns:
                 continue
             c_raw = float(row[st])
-            c_fit = max(c_raw - baseline_vals[row_idx], 0.0) if TRAIN_ON_RESIDUAL else c_raw
+            c_fit = max(c_raw - baseline_vals[row_idx], 0.0) if train_on_residual else c_raw
             obs.append(
                 [
                     srow["x"],
@@ -777,9 +878,9 @@ def run(
     print(
         f"Data summary: n_obs={len(c_obs)}, fit_min={np.min(c_obs):.3f}, fit_p50={np.percentile(c_obs, 50):.3f}, "
         f"fit_p95={np.percentile(c_obs, 95):.3f}, fit_max={np.max(c_obs):.3f}, c_scale={c_scale:.3f}, "
-        f"train_on_residual={TRAIN_ON_RESIDUAL}, baseline_mode={BASELINE_MODE}"
+        f"train_on_residual={train_on_residual}, baseline_mode={baseline_mode_actual}"
     )
-    if TRAIN_ON_RESIDUAL:
+    if train_on_residual:
         print(
             f"Baseline summary: base_min={np.min(baseline_vals):.3f}, "
             f"base_p50={np.percentile(baseline_vals, 50):.3f}, "
@@ -838,8 +939,7 @@ def run(
         )
     q_event_active = np.asarray(q_event_active, dtype=bool)
 
-    ModelCls = get_model(MODEL_NAME)
-    model = ModelCls().to(device)
+    model = PINN().to(device)
     with torch.no_grad():
         model.xs.fill_(float(source_init_x))
         model.ys.fill_(float(source_init_y))
@@ -855,7 +955,7 @@ def run(
         f"max_fit={source_init_metadata.get('max_observation_fit', 0.0):.3f}"
     )
     if FIELD_MODE == "recurrent_pde":
-        frozen_params = _freeze_recurrent_unused_parameters(model)
+        frozen_params = _freeze_recurrent_unused_parameters(model, inversion_mode_actual)
         if frozen_params:
             print(
                 "Frozen unused recurrent_pde parameters: "
@@ -874,6 +974,11 @@ def run(
         model.configure_transport_history(t_w, u_w, v_w)
         model.to(device)
     if FIELD_MODE == "recurrent_pde":
+        sigma_source_m = os.environ.get("PINN_SIGMA_SRC_M", SIGMA_SRC_M)
+        if sigma_source_m is not None:
+            sigma_source_m = float(sigma_source_m)
+            if not np.isfinite(sigma_source_m) or sigma_source_m <= 0:
+                raise ValueError("SIGMA_SRC_M must be finite and positive.")
         configure_recurrent_context(
             model=model,
             x_min=x_min,
@@ -885,7 +990,20 @@ def run(
             v_values=v_w,
             d_min_norm=normalize_diffusivity_m2s(D_MIN_PHYS, T, L),
             d_scale_norm=normalize_diffusivity_m2s(1.0, T, L),
+            anisotropic_diffusion=(ENABLE_ANISOTROPIC_DIFFUSION or inversion_mode_actual == "ia_vpdi"),
+            d_parallel_min_norm=normalize_diffusivity_m2s(
+                D_PARALLEL_MIN, T, L
+            ),
+            d_perp_min_norm=normalize_diffusivity_m2s(D_PERP_MIN, T, L),
             decay_norm=normalize_decay_per_hour(RECURRENT_DECAY, T),
+            source_mode=os.environ.get("PINN_RECURRENT_SOURCE_MODE", RECURRENT_SOURCE_MODE),
+            source_sigma_norm=None if sigma_source_m is None else sigma_source_m / L,
+            diffusion_solver=os.environ.get("PINN_RECURRENT_DIFFUSION_SOLVER", RECURRENT_DIFFUSION_SOLVER),
+            source_decay_integrator=os.environ.get("PINN_SOURCE_DECAY_INTEGRATOR", RECURRENT_SOURCE_DECAY_INTEGRATOR),
+            transport_solver=os.environ.get("PINN_TRANSPORT_SOLVER", RECURRENT_TRANSPORT_SOLVER),
+            parcel_subdivisions=_env_int("PINN_PARCEL_SUBDIVISIONS", RECURRENT_PARCEL_SUBDIVISIONS),
+            parcel_q_breakpoints=(list(IA_VP_Q_KNOTS) if IA_VP_Q_KNOTS is not None else
+                np.linspace(float(t_w[0]), float(t_w[-1]), IA_VP_Q_BASIS_COUNT).tolist()),
         )
     recurrent_substep_counts = tuple(
         getattr(model, "recurrent_substeps_per_interval", ())
@@ -896,10 +1014,122 @@ def run(
     recurrent_advection_cells = tuple(
         getattr(model, "recurrent_advection_cells_per_interval", ())
     )
-    trainable_params = [p for p in model.parameters() if p.requires_grad]
-    if not trainable_params:
-        raise ValueError("No trainable model parameters remain after mode configuration.")
-    opt = torch.optim.Adam(trainable_params, lr=LR)
+    ia_vpdi_result = None
+    ia_vpdi_exports = None
+    if inversion_mode_actual == "ia_vpdi":
+        observation_xyt = torch.cat([x_obs_t, y_obs_t, t_obs_t], dim=1)
+        search_step_m = _env_float("PINN_IA_VP_SEARCH_STEP_M", IA_VP_SEARCH_STEP_M)
+        print(
+            "IA-VPDI all-data variable-projection search: "
+            f"step={search_step_m:.1f} m, top_k={_env_int('PINN_IA_VP_TOP_K', IA_VP_TOP_K)}"
+        )
+        ia_vpdi_result = run_ia_vpdi(
+            model=model,
+            sigma_src=SIGMA_SRC,
+            observation_xyt=observation_xyt,
+            observations=c_obs_scaled,
+            source_x_bounds=(source_x_min, source_x_max),
+            source_y_bounds=(source_y_min, source_y_max),
+            search_step=search_step_m / L,
+            q_basis_count=IA_VP_Q_BASIS_COUNT,
+            q_basis_type=IA_VP_Q_BASIS_TYPE,
+            top_k=_env_int("PINN_IA_VP_TOP_K", IA_VP_TOP_K),
+            start_strategy=os.environ.get("PINN_IA_VP_START_STRATEGY", IA_VP_START_STRATEGY),
+            start_min_distance=_env_float("PINN_IA_VP_START_MIN_DISTANCE_M", IA_VP_START_MIN_DISTANCE_M) / L,
+            diffusion_scale_seeds=IA_VP_DIFFUSION_SCALE_SEEDS,
+            diffusion_ratio_seeds=IA_VP_DIFFUSION_RATIO_SEEDS,
+            weights=None,
+            outer_steps=_env_int("PINN_IA_VP_OUTER_STEPS", IA_VP_OUTER_STEPS),
+            outer_lr=IA_VP_OUTER_LR,
+            outer_patience=IA_VP_OUTER_PATIENCE,
+            outer_min_delta=IA_VP_OUTER_MIN_DELTA,
+            max_grad_norm=IA_VP_MAX_GRAD_NORM,
+            q_upper_bound=_env_float("PINN_IA_VP_Q_UPPER_BOUND", IA_VP_Q_UPPER_BOUND),
+            q_knots=IA_VP_Q_KNOTS,
+            q_layout_strategy=os.environ.get("PINN_IA_VP_Q_LAYOUT_STRATEGY", IA_VP_Q_LAYOUT_STRATEGY),
+        )
+        best_ia = ia_vpdi_result.best
+        model.configure_external_q(
+            model.recurrent_integration_times, best_ia.q_integration
+        )
+        model.to(device)
+        q_segment_info = {
+            "mode": "external",
+            "n_segments": int(ia_vpdi_result.q_basis.shape[1]),
+            "breaks": np.asarray([], dtype=np.float32),
+            "segment_ids": np.full(len(t_w), -1, dtype=int),
+        }
+        if ia_vpdi_result.timing.get('enabled'):
+            sync_device()
+        information_started = time.perf_counter()
+        information = compute_profile_information(
+            model=model,
+            sigma_src=SIGMA_SRC,
+            observation_xyt=observation_xyt,
+            observations=c_obs_scaled,
+            q_basis=ia_vpdi_result.q_basis,
+            coefficients=best_ia.coefficients,
+            weights=None,
+            active_q_tol=IA_VP_ACTIVE_Q_TOL,
+            rcond=IA_VP_INFORMATION_RCOND,
+            condition_max=IA_VP_INFORMATION_CONDITION_MAX,
+            length_m=L,
+            source_bounds=((source_x_min, source_x_max), (source_y_min, source_y_max)),
+            boundary_margin_norm=IA_VP_BOUNDARY_MARGIN_M / L,
+            q_upper_bound=ia_vpdi_result.q_upper_bound,
+            localization_radius_limit_m=IA_VP_LOCALIZATION_RADIUS_LIMIT_M,
+        )
+        if ia_vpdi_result.timing.get('enabled'):
+            sync_device()
+            information_elapsed = time.perf_counter()-information_started
+            ia_vpdi_result.timing.setdefault('stages', {})['information'] = {
+                'seconds': information_elapsed, 'calls': 1,
+            }
+            print(f"IA-VPDI timing: information={information_elapsed:.3f}s", flush=True)
+        sensors = ()
+        if _env_flag(
+            "PINN_IA_VP_SENSOR_RECOMMENDATION",
+            IA_VP_SENSOR_RECOMMENDATION_ENABLED,
+        ):
+            sensor_candidates = generate_candidate_grid(
+                (source_x_min, source_x_max),
+                (source_y_min, source_y_max),
+                IA_VP_SENSOR_GRID_STEP_M / L,
+            )
+            existing_station_xy = tuple(
+                ((float(row["x"]) - x0) / L, (float(row["y"]) - y0) / L)
+                for _, row in sites.iterrows()
+            )
+            sensors = recommend_sensor_locations(
+                model, SIGMA_SRC, sensor_candidates,
+                model.recurrent_integration_times, ia_vpdi_result.q_basis,
+                best_ia.coefficients, information,
+                existing_station_xy=existing_station_xy,
+                min_distance_norm=IA_VP_SENSOR_MIN_DISTANCE_M / L,
+                top_k=IA_VP_SENSOR_TOP_K, length_m=L,
+                rcond=IA_VP_INFORMATION_RCOND,
+            )
+        ia_vpdi_result.information = information
+        ia_vpdi_result.sensor_recommendations = sensors
+        ia_vpdi_exports = build_ia_vpdi_diagnostics(
+            ia_vpdi_result, length_m=L,
+            source_bounds=((source_x_min, source_x_max), (source_y_min, source_y_max)),
+            score_tolerances=IA_VP_REPORT_SCORE_TOLERANCES, boundary_margin_m=IA_VP_BOUNDARY_MARGIN_M,
+        )
+        print(
+            "IA-VPDI best source: "
+            f"x={best_ia.source_x * L + x0:.1f} m, "
+            f"y={best_ia.source_y * L + y0:.1f} m, "
+            f"score={best_ia.profile_score:.6g}, "
+            f"identifiability={information.status}"
+        )
+
+    opt = None
+    if inversion_mode_actual == "joint_adam":
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
+        if not trainable_params:
+            raise ValueError("No trainable model parameters remain after mode configuration.")
+        opt = torch.optim.Adam(trainable_params, lr=LR)
     if q_segment_info is not None:
         q_mode_actual = q_segment_info.get("mode", getattr(model, "q_mode", "neural"))
         if q_mode_actual == "piecewise":
@@ -916,10 +1146,14 @@ def run(
     else:
         print("Q mode: neural")
     print("Source position mode: single")
-    training_epochs = max(_env_int("PINN_EPOCHS", EPOCHS), 1)
+    training_epochs = (
+        max(_env_int("PINN_EPOCHS", EPOCHS), 1)
+        if inversion_mode_actual == "joint_adam"
+        else 0
+    )
     print(
         "Training speed settings: "
-        f"epochs={training_epochs}, field_mode={FIELD_MODE}, "
+        f"mode={inversion_mode_actual}, epochs={training_epochs}, field_mode={FIELD_MODE}, "
         f"landscape_step={SOURCE_LANDSCAPE_STEP_M}m, "
         f"gif={DIFFUSION_N_FRAMES}x{DIFFUSION_NX}x{DIFFUSION_NY}@{DIFFUSION_FPS}fps"
     )
@@ -950,13 +1184,24 @@ def run(
         print(
             "Recurrent transport settings: "
             f"wind_factor={WIND_SCALE:.3f}, D_min_m2s={D_MIN_PHYS:.3f}, "
+            f"diffusion_mode={'anisotropic' if (ENABLE_ANISOTROPIC_DIFFUSION or inversion_mode_actual == 'ia_vpdi') else 'isotropic'}, "
+            f"diffusion_solver={model.recurrent_diffusion_solver if model.recurrent_transport_solver == 'grid' else 'analytic_tensor_covariance'}, "
+            f"transport_solver={model.recurrent_transport_solver}, "
+            f"parcel_subdivisions={model.recurrent_parcel_subdivisions}, "
+            f"source_decay_integrator={model.recurrent_source_decay_integrator if model.recurrent_transport_solver == 'grid' else 'continuous_quadrature'}, "
+            f"source_mode={model.recurrent_source_mode}, "
+            f"source_sigma_m={None if model.recurrent_source_mode == 'point' else (model.recurrent_source_sigma_norm if model.recurrent_source_sigma_norm is not None else max(SIGMA_SRC, 1e-4))*L}, "
             f"decay_per_hour={RECURRENT_DECAY:.3f}, "
-            f"adaptive_substeps={RECURRENT_ADAPTIVE_SUBSTEPS}, "
-            f"substeps[min/mean/max]={selected_min}/{selected_mean:.2f}/{selected_max}, "
-            f"max_cells_per_substep={max(actual_cells, default=0.0):.3f}, "
-            f"cap_hits={cap_hit_count}"
+            + (
+                f"adaptive_substeps={RECURRENT_ADAPTIVE_SUBSTEPS}, "
+                f"substeps[min/mean/max]={selected_min}/{selected_mean:.2f}/{selected_max}, "
+                f"max_cells_per_substep={max(actual_cells, default=0.0):.3f}, "
+                f"cap_hits={cap_hit_count}"
+                if model.recurrent_transport_solver == "grid" else
+                "grid_substeps=not_applicable, grid_CFL=not_applicable"
+            )
         )
-        if cap_hit_count > 0:
+        if model.recurrent_transport_solver == "grid" and cap_hit_count > 0:
             print(
                 "Warning: adaptive recurrent substeps reached the configured "
                 f"maximum in {cap_hit_count} interval(s); the one-cell target "
@@ -971,7 +1216,11 @@ def run(
         torch.tensor(np.where(np.isclose(t_obs, tw))[0], dtype=torch.long, device=device)
         for tw in t_w
     ]
-    best_raw_loss = float("inf")
+    best_raw_loss = (
+        float(ia_vpdi_result.best.profile_score)
+        if ia_vpdi_result is not None
+        else float("inf")
+    )
     best_epoch = 0
     best_model_state = None
     early_stop_wait = 0
@@ -1005,6 +1254,17 @@ def run(
         }
 
     diagnostic_rows = []
+    D, D_parallel, D_perp = _current_diffusion_values(
+        model, device, anisotropic=(ENABLE_ANISOTROPIC_DIFFUSION or inversion_mode_actual == "ia_vpdi")
+    )
+    zero_loss = model.xs.sum() * 0.0
+    loss_data = (
+        torch.tensor(best_raw_loss, dtype=torch.float32, device=device)
+        if ia_vpdi_result is not None
+        else zero_loss
+    )
+    q_smooth_loss = zero_loss
+    q_l2_loss = zero_loss
 
     for epoch in range(1, training_epochs + 1):
         sync_device()
@@ -1059,13 +1319,8 @@ def run(
             float(RAW_RESIDUAL_BASE_WEIGHT) * raw_residual_base_loss
             + float(RAW_RESIDUAL_WORST_WEIGHT) * raw_residual_worst_loss
         )
-        D = (
-            torch.tensor(
-                float(getattr(model, "recurrent_d_min_norm", 0.0)),
-                dtype=torch.float32,
-                device=device,
-            )
-            + model.D() * float(getattr(model, "recurrent_d_scale_norm", 1.0))
+        D, D_parallel, D_perp = _current_diffusion_values(
+            model, device, anisotropic=(ENABLE_ANISOTROPIC_DIFFUSION or inversion_mode_actual == "ia_vpdi")
         )
         Q_mean = torch.mean(model.Q(t_w_t.view(-1, 1)) * T)
         sync_device()
@@ -1161,7 +1416,7 @@ def run(
                 f"epoch_total={epoch_total_time:.3f}s"
             )
         if DEBUG_EVERY > 0 and epoch % DEBUG_EVERY == 0:
-            if TRAIN_ON_RESIDUAL:
+            if train_on_residual:
                 pred_raw = c_pred * c_scale + c_obs_baseline_t
             else:
                 pred_raw = c_pred * c_scale
@@ -1259,7 +1514,7 @@ def run(
                 center_pred = concentration_from_components(
                     center_bg, center_plume, center_q, center_source
                 )
-                if TRAIN_ON_RESIDUAL:
+                if train_on_residual:
                     center_pred_raw = center_pred * c_scale + torch.tensor(
                         baseline_w, dtype=torch.float32, device=device
                     ).view(-1, 1)
@@ -1306,6 +1561,16 @@ def run(
                     "q_smooth_loss": float(q_smooth_loss.detach().item()),
                     "q_l2_loss": float(q_l2_loss.detach().item()),
                     "D_norm": float(D.detach().item()),
+                    "D_parallel_norm": (
+                        float(D_parallel.detach().item())
+                        if D_parallel is not None
+                        else None
+                    ),
+                    "D_perp_norm": (
+                        float(D_perp.detach().item())
+                        if D_perp is not None
+                        else None
+                    ),
                     "Q_mean_collocation": float(Q_mean.detach().item()),
                     "Q_mean_observation": float(q_obs.detach().mean().item()),
                     "fit_raw_rmse": float(
@@ -1395,8 +1660,8 @@ def run(
         model=model,
         t_values=t_w,
         time_labels=time_w_labels,
-        q_min=Q_MIN,
-        q_max=Q_MAX,
+        q_min=Q_MIN if inversion_mode_actual == "joint_adam" else None,
+        q_max=Q_MAX if inversion_mode_actual == "joint_adam" else None,
     )
 
     inversion_text_exports = export_hourly_concentration_text_outputs(
@@ -1433,15 +1698,19 @@ def run(
         pred_diag = concentration_from_components(
             bg_diag, plume_diag, q_diag, source_diag
         )
-        if TRAIN_ON_RESIDUAL:
+        if train_on_residual:
             pred_diag_raw = pred_diag * c_scale + c_obs_baseline_t
         else:
             pred_diag_raw = pred_diag * c_scale
 
     training_diagnostics_df = pd.DataFrame(diagnostic_rows)
+    ia_vpdi_tables = ia_vpdi_exports["tables"] if ia_vpdi_exports is not None else {}
 
     pred_diag_np = pred_diag.detach().cpu().numpy().reshape(-1)
     pred_diag_raw_np = pred_diag_raw.detach().cpu().numpy().reshape(-1)
+    background_floor = nonnegative_background_floor(
+        c_obs_raw, c_obs_baseline, obs_station_labels, pred_diag_raw_np
+    )
     station_peak_rows = []
     obs_station_labels_np = np.array(obs_station_labels, dtype=object)
     obs_time_labels_np = np.array(obs_time_labels, dtype=object)
@@ -1611,8 +1880,18 @@ def run(
                         "source result is low confidence"
                     )
 
+    ia_vpdi_quality = None
+    if ia_vpdi_result is not None:
+        for warning in ia_vpdi_result.information.warnings:
+            if warning not in quality_warnings:
+                quality_warnings.append(warning)
+        if not ia_vpdi_result.best.solver_success:
+            quality_warnings.append("IA-VPDI nonnegative Q solver did not report success")
+        ia_vpdi_quality = ia_vpdi_exports["report"]
+
     quality_payload = {
         "target_pollutant": result_target_pollutant,
+        "inversion_mode": inversion_mode_actual,
         "training_inputs": copied_input_paths,
         "station_ablation": ablation_metadata
         or {
@@ -1623,11 +1902,17 @@ def run(
         "model": {
             "field_mode": FIELD_MODE,
             "q_mode": getattr(model, "q_mode", Q_MODE),
-            "train_on_residual": bool(TRAIN_ON_RESIDUAL),
+            "train_on_residual": bool(train_on_residual),
+            "baseline_mode": baseline_mode_actual if train_on_residual else "none",
+            "background_error_floor": background_floor,
             "data_normalize": bool(DATA_NORMALIZE),
             "c_scale": float(c_scale),
             "data_loss": {
-                "mode": "raw_weighted_mae_plus_worst_residual",
+                "mode": (
+                    "all_observation_profiled_mse"
+                    if inversion_mode_actual == "ia_vpdi"
+                    else "raw_weighted_mae_plus_worst_residual"
+                ),
                 "raw_residual_base_weight": float(RAW_RESIDUAL_BASE_WEIGHT),
                 "raw_residual_worst_weight": float(RAW_RESIDUAL_WORST_WEIGHT),
                 "weighted_base_uses_sqrt_data_weight": True,
@@ -1645,8 +1930,10 @@ def run(
                 "grid_ny": int(RECURRENT_GRID_NY),
                 "substeps": int(RECURRENT_SUBSTEPS),
                 "substeps_mode": (
+                    "not_applicable" if model.recurrent_transport_solver == "gaussian_parcels" else
                     "adaptive" if RECURRENT_ADAPTIVE_SUBSTEPS else "fixed"
                 ),
+                "grid_substep_diagnostics_applied": model.recurrent_transport_solver == "grid",
                 "minimum_substeps": int(RECURRENT_SUBSTEPS),
                 "maximum_substeps": int(RECURRENT_MAX_SUBSTEPS),
                 "max_advection_cells_target": float(
@@ -1667,11 +1954,69 @@ def run(
                 ),
                 "substep_cap_hit_count": int(cap_hit_count),
                 "source_scale": float(RECURRENT_SOURCE_SCALE),
+                "source_mode": model.recurrent_source_mode,
+                "source_sigma_m": (None if model.recurrent_source_mode == "point" else
+                    float(model.recurrent_source_sigma_norm if model.recurrent_source_sigma_norm is not None
+                          else max(SIGMA_SRC, 1e-4)) * L),
+                "source_boundary_normalization": (
+                    "full_space_normalized_gaussian" if model.recurrent_transport_solver == "gaussian_parcels" else
+                    "renormalized_inside_grid" if model.recurrent_source_mode == "gaussian"
+                    else "full_space_cell_integral" if model.recurrent_source_mode == "cell_gaussian"
+                    else "conservative_four_node_deposition"),
+                "diffusion_solver": model.recurrent_diffusion_solver,
+                "transport_solver": model.recurrent_transport_solver,
+                "parcel_subdivisions": model.recurrent_parcel_subdivisions,
+                "transport_boundary": "full_space" if model.recurrent_transport_solver == "gaussian_parcels" else "absorbing_zero_exterior",
+                "forward_count_unit": "temporal_basis_response_equivalents",
+                "grid_diffusion_applied": model.recurrent_transport_solver == "grid",
+                "release_integration_applied": "continuous_quadrature" if model.recurrent_transport_solver == "gaussian_parcels" else model.recurrent_source_decay_integrator,
+                "source_decay_integrator": model.recurrent_source_decay_integrator,
+                "diffusion_boundary": "full_space" if model.recurrent_transport_solver == "gaussian_parcels" else "absorbing_zero_exterior",
                 "decay": float(RECURRENT_DECAY),
                 "decay_units": "1/hour",
                 "decay_norm": float(getattr(model, "recurrent_decay_norm", 0.0)),
                 "wind_factor": float(WIND_SCALE),
                 "diffusion_units": "m^2/s",
+                "diffusion_mode": (
+                    "anisotropic"
+                    if (ENABLE_ANISOTROPIC_DIFFUSION or inversion_mode_actual == "ia_vpdi")
+                    else "isotropic"
+                ),
+                "d_parallel_norm": (
+                    float(D_parallel.detach().item())
+                    if D_parallel is not None
+                    else None
+                ),
+                "d_perp_norm": (
+                    float(D_perp.detach().item())
+                    if D_perp is not None
+                    else None
+                ),
+                "d_effective_m2s": float(
+                    D.detach().item()
+                    / max(
+                        float(getattr(model, "recurrent_d_scale_norm", 1.0)),
+                        1.0e-12,
+                    )
+                ),
+                "d_parallel_m2s": (
+                    float(D_parallel.detach().item())
+                    / max(
+                        float(getattr(model, "recurrent_d_scale_norm", 1.0)),
+                        1.0e-12,
+                    )
+                    if D_parallel is not None
+                    else None
+                ),
+                "d_perp_m2s": (
+                    float(D_perp.detach().item())
+                    / max(
+                        float(getattr(model, "recurrent_d_scale_norm", 1.0)),
+                        1.0e-12,
+                    )
+                    if D_perp is not None
+                    else None
+                ),
                 "initial_release_fraction": float(RECURRENT_INITIAL_RELEASE_FRACTION),
                 "d_min_norm": float(getattr(model, "recurrent_d_min_norm", 0.0)),
                 "d_scale_norm": float(getattr(model, "recurrent_d_scale_norm", 1.0)),
@@ -1692,6 +2037,7 @@ def run(
             "domain_y_max_m": float(source_y_max_p),
             "min_boundary_margin_m": float(source_margin_m),
         },
+        "ia_vpdi": ia_vpdi_quality,
         "inversion_text_outputs": inversion_text_exports,
         "fit_raw_rmse": fit_rmse_quality,
         "field_components": {
@@ -1711,7 +2057,11 @@ def run(
     landscape = None
     source_landscape_df = pd.DataFrame()
     confidence_map = None
-    if USE_SOURCE_LANDSCAPE_CONFIDENCE and run_id is None:
+    if (
+        inversion_mode_actual == "joint_adam"
+        and USE_SOURCE_LANDSCAPE_CONFIDENCE
+        and run_id is None
+    ):
         print(
             "Computing fast source confidence landscape: "
             f"mode={SOURCE_LANDSCAPE_MODE}, radius={SOURCE_LANDSCAPE_RADIUS_M} m, "
@@ -1803,6 +2153,7 @@ def run(
         "training": training_diagnostics_df,
         "station_peaks": station_peak_diagnostics_df,
         "source_landscape": source_landscape_df,
+        **ia_vpdi_tables,
     }
     diagnostic_tables = {
         name: table for name, table in diagnostic_tables.items() if not table.empty
@@ -1924,6 +2275,9 @@ def run(
         "target_pollutant": result_target_pollutant,
         "training_inputs": copied_input_paths,
         "field_mode": FIELD_MODE,
+        "inversion_mode": inversion_mode_actual,
+        "train_on_residual": bool(train_on_residual),
+        "baseline_mode": baseline_mode_actual if train_on_residual else "none",
     }
 
     if landscape is not None:
