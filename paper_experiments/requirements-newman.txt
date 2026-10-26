@@ -1,0 +1,4 @@
+# Author runtime: use Python3.10.12 in an isolated environment.
+# Old jaxlib wheels are retained in the official archive, no longer on PyPI.
+--find-links https://storage.googleapis.com/jax-releases/jax_releases.html
+sourceinversion==0.1.5
