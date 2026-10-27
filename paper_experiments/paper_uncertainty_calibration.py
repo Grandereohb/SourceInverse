@@ -17,9 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]/'result/paper_experiments_20261017'
 
 def calibration_threshold(scores, coverage=.95):
     values = np.asarray(scores, dtype=float)
-    if (values.ndim != 1 or not len(values) or not np.isfinite(values).all()
+    if (values.ndim != 1 or not len(values) or np.isnan(values).any()
             or np.any(values < 0) or not 0 < coverage < 1):
-        raise ValueError('Finite nonnegative case scores and coverage in (0,1) required')
+        raise ValueError('Nonnegative extended-real case scores and coverage in (0,1) required')
     rank = math.ceil((len(values)+1)*coverage)
     return float(np.sort(values)[rank-1]) if rank <= len(values) else float('inf')
 
@@ -27,24 +27,30 @@ def calibration_threshold(scores, coverage=.95):
 def calibrate(frame):
     selected = frame[(frame.cohort == 'nominal') &
                      (frame.diagnostic == 'eliminate_Q_D')].copy()
-    if selected.case_id.duplicated().any() or not selected.available.all():
-        raise ValueError('Expected one defined Q/D-profiled ellipse per nominal case')
+    if selected.case_id.duplicated().any():
+        raise ValueError('Expected one Q/D-profiled diagnostic per nominal case')
+    if not np.isfinite(selected.loc[selected.available, 'mahalanobis_squared']).all():
+        raise ValueError('Defined ellipses require finite nonconformity scores')
+    # Keep unavailable cases in the frozen sample; do not calibrate a selected subset.
+    selected['calibration_score'] = selected.mahalanobis_squared.where(selected.available, np.inf)
     calibration = selected[selected['repeat'].between(0, 3)]
     validation = selected[selected['repeat'].between(4, 7)]
     if len(calibration) != 48 or len(validation) != 48:
         raise ValueError('Expected the frozen balanced 48/48 case partition')
-    threshold = calibration_threshold(calibration.mahalanobis_squared)
+    threshold = calibration_threshold(calibration.calibration_score)
     selected['partition'] = np.where(selected['repeat'] < 4, 'calibration', 'validation')
     selected['raw_threshold'] = 5.991
     selected['calibrated_threshold'] = threshold
-    selected['raw_contains_truth'] = selected.mahalanobis_squared <= 5.991
-    selected['calibrated_contains_truth'] = selected.mahalanobis_squared <= threshold
+    selected['raw_contains_truth'] = selected.available & (selected.mahalanobis_squared <= 5.991)
+    selected['calibrated_contains_truth'] = selected.available & (selected.mahalanobis_squared <= threshold)
     selected['calibrated_major_m'] = selected.major_m*np.sqrt(threshold/5.991)
     selected['axis_scale'] = np.sqrt(threshold/5.991)
     summaries = []
     for partition, group in selected.groupby('partition'):
         for network, sample in [('all', group), *group.groupby('network')]:
             summaries.append(dict(partition=partition, network=network, n=len(sample),
+                defined_ellipses=int(sample.available.sum()),
+                unavailable_ellipses=int((~sample.available).sum()),
                 raw_inclusions=int(sample.raw_contains_truth.sum()),
                 calibrated_inclusions=int(sample.calibrated_contains_truth.sum()),
                 raw_coverage=float(sample.raw_contains_truth.mean()),

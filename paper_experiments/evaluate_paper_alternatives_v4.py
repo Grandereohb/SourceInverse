@@ -78,6 +78,9 @@ def evaluate(study, device='cpu', limit=None):
             model, xyt, basis = formal.parcel.configure(metadata, stations, device,
                 sigma=metadata['sigma'], wind_interval_mean=True)
             model.double()
+            capacity = record['methods']['ia_vpdi'].get('q_basis_count', 5)
+            if capacity != 5:
+                basis = formal.base.vp.build_q_basis(model.recurrent_integration_times, capacity)
             response = CachedMeanResponse(stations=len(stations))
             pool = np.load(trace)['candidate_surface']
             lower, upper = np.asarray(record['bounds']['lower']), np.asarray(record['bounds']['upper'])
@@ -109,6 +112,7 @@ def evaluate(study, device='cpu', limit=None):
         planned_cases=96, source_estimates_changed=False, new_candidate_locations_added=False,
         source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         scope='finite original pool, re-solved Q under common new box; not a global landscape or confidence region')
+    status['release_capacity_scope'] = 'conditional on each selected capacity; no BIC re-selection at alternatives'
     (analysis/'alternatives_status.json').write_text(json.dumps(status, indent=2), encoding='utf-8')
     return status
 

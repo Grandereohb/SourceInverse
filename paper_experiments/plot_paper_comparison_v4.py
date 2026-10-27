@@ -41,9 +41,9 @@ def ecdf(axis, values, **kwargs):
                   where='post', **kwargs)
 
 
-def legend(fig):
+def legend(fig, active=METHODS):
     handles = [Line2D([], [], color=c, ls=s, lw=1.5, label=n)
-               for n, c, s in zip(LABELS, COLORS, STYLES)]
+               for code, n, c, s in zip(METHODS, LABELS, COLORS, STYLES) if code in active]
     fig.legend(handles=handles, loc='upper center', ncol=4, bbox_to_anchor=(.53, .995),
                columnspacing=1.4, handlelength=2.3, frameon=False)
 
@@ -185,13 +185,16 @@ def public_figure(folder, output, tools, preview=False):
     raw = pd.read_csv(folder/'analysis/replicate_metrics.csv')
     protocol = json.loads((folder/'protocol.json').read_text(encoding='utf-8'))
     events = [item['source'].replace('_', '')+'_'+item['release'] for item in protocol['events']]
+    active = tuple(code for code in METHODS if code in protocol['methods'])
     fig, axes = plt.subplots(2, 1, figsize=(7.2, 4.7))
     fig.subplots_adjust(left=.09, right=.985, bottom=.16, top=.88, hspace=.55)
     for row, (axis, height) in enumerate(zip(axes, protocol['heights_m'])):
         for index, (method, color) in enumerate(zip(METHODS, COLORS)):
+            if method not in active:
+                continue
             series = frame[(frame.height_m == height) & (frame.method == method)].set_index('event')
             y = series.reindex(events).localization_error_m.to_numpy()
-            x = np.arange(len(events))+(index-1.5)*.16
+            x = np.arange(len(events))+(active.index(method)-(len(active)-1)/2)*.16
             axis.scatter(x, y, s=20, c=color, marker=['o', 's', '^', 'D'][index])
             if method == 'standard_gbest_pso':
                 replicates = raw[(raw.height_m == height) & (raw.method == method)]
@@ -202,13 +205,15 @@ def public_figure(folder, output, tools, preview=False):
                  ylabel='Localization error (m)', title=f'{chr(97+row)}  Prescribed source height {height:g} m',
                  ylim=(0., max(frame.localization_error_m.max()*1.08, 1.)))
         axis.grid(axis='y', color='.9', lw=.5)
-    legend(fig)
+    legend(fig, active)
     if preview:
         fig.text(.5, .925, 'INCOMPLETE BATCH - INTERNAL LAYOUT PREVIEW', ha='center', fontsize=8)
     save(fig, output/'public_release_localization', tools,
         'Eight windows at two physical sources, all seven light paths and shared constant-Q '
-        'capacity. Both prescribed heights shown, no best-height selection. PSO main symbol '
-        'is seed-median error; small points retain all three seeds. Heights and shared physical '
+        'capacity. Both prescribed heights shown, no best-height selection. '
+        + ('PSO main symbol is seed-median error; small points retain all three seeds. '
+           if 'standard_gbest_pso' in active else '')+
+        'Heights and shared physical '
         'sources are not independent experimental replicates. Newman uses its own author '
         'plume/prior/background model and is reported separately. '
         f'Preview={preview}. Source data: public case_metrics.csv and replicate_metrics.csv.')

@@ -1,0 +1,392 @@
+{
+  "date": "2026-10-21",
+  "scripts": 42,
+  "tests": 21,
+  "protected_files_hash_verified": 1127,
+  "preexisting_missing_paths": [
+    "C:\\Document\\phd\\SourceInverse\\SourceInverse\\result\\paper_experiments_20261017\\manuscript_results_v1\\论文实验结果更新汇总.docx"
+  ],
+  "production_unit_tests": 153,
+  "paper_unit_tests": 78,
+  "paper_tests_skipped": 1,
+  "moved_files": [
+    {
+      "old_path": "scripts\\analyze_paper_constant_q.py",
+      "new_path": "paper_experiments\\analyze_paper_constant_q.py",
+      "sha256_before": "ED446D3A21BC865472CA2E627B99218D06ED7E44FB716EC0AB42BB8A26003340",
+      "sha256_after": "ED446D3A21BC865472CA2E627B99218D06ED7E44FB716EC0AB42BB8A26003340"
+    },
+    {
+      "old_path": "scripts\\analyze_paper_controlled_release.py",
+      "new_path": "paper_experiments\\analyze_paper_controlled_release.py",
+      "sha256_before": "E66B7F0B43F70C92DE0F158425BD0F5AF049CBE8D4D3C555EF41D3DBCD9C43CE",
+      "sha256_after": "E66B7F0B43F70C92DE0F158425BD0F5AF049CBE8D4D3C555EF41D3DBCD9C43CE"
+    },
+    {
+      "old_path": "scripts\\analyze_paper_development.py",
+      "new_path": "paper_experiments\\analyze_paper_development.py",
+      "sha256_before": "7C6098205004DCD797BAB6837FBBB4E37DDD6E365B057F6B31DF8EBB75F00E56",
+      "sha256_after": "7C6098205004DCD797BAB6837FBBB4E37DDD6E365B057F6B31DF8EBB75F00E56"
+    },
+    {
+      "old_path": "scripts\\analyze_paper_formal.py",
+      "new_path": "paper_experiments\\analyze_paper_formal.py",
+      "sha256_before": "06BDFF224C6F4A237E2441BB8883A9CF9D2774DF3DDF677D704E830D1259C10A",
+      "sha256_after": "06BDFF224C6F4A237E2441BB8883A9CF9D2774DF3DDF677D704E830D1259C10A"
+    },
+    {
+      "old_path": "scripts\\analyze_paper_industrial_cases.py",
+      "new_path": "paper_experiments\\analyze_paper_industrial_cases.py",
+      "sha256_before": "D5A2AD159F3E059C65385DC3AB27E2663E27C1E9C31EF5D93FF6E949B4123471",
+      "sha256_after": "D5A2AD159F3E059C65385DC3AB27E2663E27C1E9C31EF5D93FF6E949B4123471"
+    },
+    {
+      "old_path": "scripts\\audit_paper_controlled_release_data.py",
+      "new_path": "paper_experiments\\audit_paper_controlled_release_data.py",
+      "sha256_before": "A4EA98E32595337A14F403365B3D111B2AC2DD7EF46DB232C80F7A55E493FE04",
+      "sha256_after": "A4EA98E32595337A14F403365B3D111B2AC2DD7EF46DB232C80F7A55E493FE04"
+    },
+    {
+      "old_path": "scripts\\build_paper_results_summary.py",
+      "new_path": "paper_experiments\\build_paper_results_summary.py",
+      "sha256_before": "6F28A710FEEE92CA5106E69ECB99F20AEAF0787DEA39C14319749B43315DB815",
+      "sha256_after": "6F28A710FEEE92CA5106E69ECB99F20AEAF0787DEA39C14319749B43315DB815"
+    },
+    {
+      "old_path": "scripts\\build_paper_writing_data.py",
+      "new_path": "paper_experiments\\build_paper_writing_data.py",
+      "sha256_before": "6FC6FF06A02B653E5C0AD0E8AA9290F7FE1641B48B5C92CF76007475719D58C3",
+      "sha256_after": "6FC6FF06A02B653E5C0AD0E8AA9290F7FE1641B48B5C92CF76007475719D58C3"
+    },
+    {
+      "old_path": "scripts\\check_paper_optimizer_convergence.py",
+      "new_path": "paper_experiments\\check_paper_optimizer_convergence.py",
+      "sha256_before": "F53AF41919206BEB1F63BF63C6B78964F2291DE1411EB3D792CFD3F81D0CB0FC",
+      "sha256_after": "F53AF41919206BEB1F63BF63C6B78964F2291DE1411EB3D792CFD3F81D0CB0FC"
+    },
+    {
+      "old_path": "scripts\\extend_paper_manuscript_supplement.py",
+      "new_path": "paper_experiments\\extend_paper_manuscript_supplement.py",
+      "sha256_before": "D34B00C44E40B447DCB4E72B5FF784723139BB971E606A0B530C8429CA231390",
+      "sha256_after": "D34B00C44E40B447DCB4E72B5FF784723139BB971E606A0B530C8429CA231390"
+    },
+    {
+      "old_path": "scripts\\fit_paper_controlled_release.py",
+      "new_path": "paper_experiments\\fit_paper_controlled_release.py",
+      "sha256_before": "9727B03A7FB2789B074D9EBA8BBABBB4FED59DE4ED52A92DBC5BADA4EC917DED",
+      "sha256_after": "9727B03A7FB2789B074D9EBA8BBABBB4FED59DE4ED52A92DBC5BADA4EC917DED"
+    },
+    {
+      "old_path": "scripts\\paper_baseline_demos.py",
+      "new_path": "paper_experiments\\paper_baseline_demos.py",
+      "sha256_before": "81F845578C7370552FDC2969F124F2728A82BC3A2368CF230A4D17DEA7D0BEA1",
+      "sha256_after": "81F845578C7370552FDC2969F124F2728A82BC3A2368CF230A4D17DEA7D0BEA1"
+    },
+    {
+      "old_path": "scripts\\paper_bounded_baseline.py",
+      "new_path": "paper_experiments\\paper_bounded_baseline.py",
+      "sha256_before": "BF01AD961E68798D48BC70F11EFFE846EFC5823FAF826D3218A3A4839E02B6EC",
+      "sha256_after": "BF01AD961E68798D48BC70F11EFFE846EFC5823FAF826D3218A3A4839E02B6EC"
+    },
+    {
+      "old_path": "scripts\\paper_fast_parcels.py",
+      "new_path": "paper_experiments\\paper_fast_parcels.py",
+      "sha256_before": "86A008EADCF621DE1D23159B5CE56DBACC7055B679DDACA1EDED5B0FD5AEFE80",
+      "sha256_after": "86A008EADCF621DE1D23159B5CE56DBACC7055B679DDACA1EDED5B0FD5AEFE80"
+    },
+    {
+      "old_path": "scripts\\paper_industrial_transport.py",
+      "new_path": "paper_experiments\\paper_industrial_transport.py",
+      "sha256_before": "329F10FAE9F4B3846B3BB37BCE11D43CD517A00C352913156072E2F23B67E383",
+      "sha256_after": "5C36884F8FA9401C888969B9A75D9E17490566E6F4A91EAB320281C4C2CE693D"
+    },
+    {
+      "old_path": "scripts\\paper_observation_operators.py",
+      "new_path": "paper_experiments\\paper_observation_operators.py",
+      "sha256_before": "CC869F3EABB2CA100F722F6A29D04ADA4973DBBE257FADD8394EADE9042DF8F7",
+      "sha256_after": "CC869F3EABB2CA100F722F6A29D04ADA4973DBBE257FADD8394EADE9042DF8F7"
+    },
+    {
+      "old_path": "scripts\\paper_physical_beam_adapter.py",
+      "new_path": "paper_experiments\\paper_physical_beam_adapter.py",
+      "sha256_before": "78D2B58F23447A6B8E12DC289E3971DB95EACD9BFB6BDDF7A5A0CF3597A80804",
+      "sha256_after": "78D2B58F23447A6B8E12DC289E3971DB95EACD9BFB6BDDF7A5A0CF3597A80804"
+    },
+    {
+      "old_path": "scripts\\paper_probabilistic_demo.py",
+      "new_path": "paper_experiments\\paper_probabilistic_demo.py",
+      "sha256_before": "B20AED9A3B42F32DDD12F49A1DF0659DCA91AA679A8B8686B264CC288BB5C2EC",
+      "sha256_after": "B20AED9A3B42F32DDD12F49A1DF0659DCA91AA679A8B8686B264CC288BB5C2EC"
+    },
+    {
+      "old_path": "scripts\\paper_reference_transport.py",
+      "new_path": "paper_experiments\\paper_reference_transport.py",
+      "sha256_before": "11E09B9DFC22E59FBD35CA77CF314AF6062CC2E6041576414BF929207731C1F0",
+      "sha256_after": "11E09B9DFC22E59FBD35CA77CF314AF6062CC2E6041576414BF929207731C1F0"
+    },
+    {
+      "old_path": "scripts\\paper_scaled_inner_q.py",
+      "new_path": "paper_experiments\\paper_scaled_inner_q.py",
+      "sha256_before": "5099FCB2E52ADCA3474499C70B3AFF3537FC42EA838AF9BA43474E9CCDC01308",
+      "sha256_after": "5099FCB2E52ADCA3474499C70B3AFF3537FC42EA838AF9BA43474E9CCDC01308"
+    },
+    {
+      "old_path": "scripts\\paper_steady_beam_baseline.py",
+      "new_path": "paper_experiments\\paper_steady_beam_baseline.py",
+      "sha256_before": "1DAACA78C1088780A4EF29016EA7BFBF6D53A801DB200F0032F7CBCF69FADC2A",
+      "sha256_after": "1DAACA78C1088780A4EF29016EA7BFBF6D53A801DB200F0032F7CBCF69FADC2A"
+    },
+    {
+      "old_path": "scripts\\paper_uncertainty_calibration.py",
+      "new_path": "paper_experiments\\paper_uncertainty_calibration.py",
+      "sha256_before": "212754A90852853A9596804208265DD33FF0EC20B4A82BA5F908BA4C7CA00707",
+      "sha256_after": "212754A90852853A9596804208265DD33FF0EC20B4A82BA5F908BA4C7CA00707"
+    },
+    {
+      "old_path": "scripts\\plot_paper_constant_q.py",
+      "new_path": "paper_experiments\\plot_paper_constant_q.py",
+      "sha256_before": "065FFFD88ABE7A7DD370AC5DE1F06D41275628E4086E4ABA21138F699414C281",
+      "sha256_after": "065FFFD88ABE7A7DD370AC5DE1F06D41275628E4086E4ABA21138F699414C281"
+    },
+    {
+      "old_path": "scripts\\plot_paper_controlled_release.py",
+      "new_path": "paper_experiments\\plot_paper_controlled_release.py",
+      "sha256_before": "2C32AF69566C83E90CD6E04870A2B3085CA70CB3B23A6FB71FFFF8641D16B4C9",
+      "sha256_after": "2C32AF69566C83E90CD6E04870A2B3085CA70CB3B23A6FB71FFFF8641D16B4C9"
+    },
+    {
+      "old_path": "scripts\\plot_paper_development.py",
+      "new_path": "paper_experiments\\plot_paper_development.py",
+      "sha256_before": "B4D3FB8D700E5D3D817A8B1F63625F5A419A137F7112BEAC9EABED26C434C845",
+      "sha256_after": "B4D3FB8D700E5D3D817A8B1F63625F5A419A137F7112BEAC9EABED26C434C845"
+    },
+    {
+      "old_path": "scripts\\plot_paper_formal.py",
+      "new_path": "paper_experiments\\plot_paper_formal.py",
+      "sha256_before": "DD4920A1BEA424344F017E828746EFD85D50BF955C96B4409F1FFE82610F0701",
+      "sha256_after": "DD4920A1BEA424344F017E828746EFD85D50BF955C96B4409F1FFE82610F0701"
+    },
+    {
+      "old_path": "scripts\\plot_paper_industrial_representatives.py",
+      "new_path": "paper_experiments\\plot_paper_industrial_representatives.py",
+      "sha256_before": "2EC251C0BF34884D50FC7669A646807EC0B788535C1B67BF0C2D947A0D04624B",
+      "sha256_after": "2EC251C0BF34884D50FC7669A646807EC0B788535C1B67BF0C2D947A0D04624B"
+    },
+    {
+      "old_path": "scripts\\prepare_paper_controlled_release.py",
+      "new_path": "paper_experiments\\prepare_paper_controlled_release.py",
+      "sha256_before": "7426BB5FCDE51C13DDA8DBFA521DE86FEFCB850DE21A435AB6B453936D580461",
+      "sha256_after": "7426BB5FCDE51C13DDA8DBFA521DE86FEFCB850DE21A435AB6B453936D580461"
+    },
+    {
+      "old_path": "scripts\\prepare_paper_industrial_cases.py",
+      "new_path": "paper_experiments\\prepare_paper_industrial_cases.py",
+      "sha256_before": "BB7255F08E108DE2D6B25C2B5DA7C1100ED5C4E998FC04CD1D6315B6D54DE41A",
+      "sha256_after": "FA0487EDFF4498BD702CEF7ECCDA6CA0691EE94649B5050C9C70F57D4E7D00A9"
+    },
+    {
+      "old_path": "scripts\\refine_paper_controlled_precision.py",
+      "new_path": "paper_experiments\\refine_paper_controlled_precision.py",
+      "sha256_before": "0E9A67CCA7D37D2615BE9BA816BAB14A910071690BD49D810786AFABE1D108C4",
+      "sha256_after": "684491A0C86DF723013A851D2B91562FFCB8BCC024E69D85BB2FFA40F485146D"
+    },
+    {
+      "old_path": "scripts\\resume_paper_formal_boundary_fix.py",
+      "new_path": "paper_experiments\\resume_paper_formal_boundary_fix.py",
+      "sha256_before": "918EA8D8758908B5B449947AA646D30F624E98310E2995E7ABA3541208E31F02",
+      "sha256_after": "918EA8D8758908B5B449947AA646D30F624E98310E2995E7ABA3541208E31F02"
+    },
+    {
+      "old_path": "scripts\\run_paper_constant_q.py",
+      "new_path": "paper_experiments\\run_paper_constant_q.py",
+      "sha256_before": "5AEFA782177F52A2F97040FA4AABF4BDA4141B91D9D46DB6DB51180268D38046",
+      "sha256_after": "5AEFA782177F52A2F97040FA4AABF4BDA4141B91D9D46DB6DB51180268D38046"
+    },
+    {
+      "old_path": "scripts\\run_paper_controlled_release.py",
+      "new_path": "paper_experiments\\run_paper_controlled_release.py",
+      "sha256_before": "24597D06CEB8BB516F7FE2DC624F75AE0CD48AB545BE99FC1C6CA7F493BF5004",
+      "sha256_after": "24597D06CEB8BB516F7FE2DC624F75AE0CD48AB545BE99FC1C6CA7F493BF5004"
+    },
+    {
+      "old_path": "scripts\\run_paper_experiments.py",
+      "new_path": "paper_experiments\\run_paper_experiments.py",
+      "sha256_before": "E55F2CEBC37B4977DEBBF5B578EBBC219A799F6F434818AFDC3D5BCE65E5E4E3",
+      "sha256_after": "E55F2CEBC37B4977DEBBF5B578EBBC219A799F6F434818AFDC3D5BCE65E5E4E3"
+    },
+    {
+      "old_path": "scripts\\run_paper_extension_headless.py",
+      "new_path": "paper_experiments\\run_paper_extension_headless.py",
+      "sha256_before": "DA0DE2AFF8944C4A68561060AEF6A5071A923F32BB003ADD06BB91C700DB4F4D",
+      "sha256_after": "DA0DE2AFF8944C4A68561060AEF6A5071A923F32BB003ADD06BB91C700DB4F4D"
+    },
+    {
+      "old_path": "scripts\\run_paper_formal_experiments.py",
+      "new_path": "paper_experiments\\run_paper_formal_experiments.py",
+      "sha256_before": "F88562C8B7895FFF522C30BEB48E16DE71201F1D889934520E428697804094A9",
+      "sha256_after": "F88562C8B7895FFF522C30BEB48E16DE71201F1D889934520E428697804094A9"
+    },
+    {
+      "old_path": "scripts\\run_paper_industrial_cases.py",
+      "new_path": "paper_experiments\\run_paper_industrial_cases.py",
+      "sha256_before": "07F6F0C00259E06ECD67E15A34056C4B17EADCC226F2101F31518884B2717C68",
+      "sha256_after": "05C153E59F1BDF40E884EBAB11E17BEF9238E3F8CD00659AFE9CF8409B05BDD2"
+    },
+    {
+      "old_path": "scripts\\run_paper_industrial_representatives.py",
+      "new_path": "paper_experiments\\run_paper_industrial_representatives.py",
+      "sha256_before": "5A5C09DB9CCB2A44DABC1E9D070781ACED46A520527CC912046E1DF485825D28",
+      "sha256_after": "5A5C09DB9CCB2A44DABC1E9D070781ACED46A520527CC912046E1DF485825D28"
+    },
+    {
+      "old_path": "scripts\\run_paper_manuscript_supplement.py",
+      "new_path": "paper_experiments\\run_paper_manuscript_supplement.py",
+      "sha256_before": "664D2CBA1B1B77A3D925F6BF8A00C102053CACF450BBE34F990028A16C692ACB",
+      "sha256_after": "664D2CBA1B1B77A3D925F6BF8A00C102053CACF450BBE34F990028A16C692ACB"
+    },
+    {
+      "old_path": "scripts\\run_paper_parcel_pilot.py",
+      "new_path": "paper_experiments\\run_paper_parcel_pilot.py",
+      "sha256_before": "62B6FAF049B45C8655F4B5FC6E704DB6DF9F55153F6D59E8F4C728547128924D",
+      "sha256_after": "62B6FAF049B45C8655F4B5FC6E704DB6DF9F55153F6D59E8F4C728547128924D"
+    },
+    {
+      "old_path": "scripts\\run_paper_shared_forward.py",
+      "new_path": "paper_experiments\\run_paper_shared_forward.py",
+      "sha256_before": "864F970C7B30661C303D2674AFCB71919D1509CFC74A1EDB28F9B90D8511C8D1",
+      "sha256_after": "864F970C7B30661C303D2674AFCB71919D1509CFC74A1EDB28F9B90D8511C8D1"
+    },
+    {
+      "old_path": "scripts\\verify_paper_experiment_resolution.py",
+      "new_path": "paper_experiments\\verify_paper_experiment_resolution.py",
+      "sha256_before": "88F5D109FC8F0A2CED24D9714E7B33010651F8988ADC44A75DF55430886566F4",
+      "sha256_after": "88F5D109FC8F0A2CED24D9714E7B33010651F8988ADC44A75DF55430886566F4"
+    },
+    {
+      "old_path": "tests\\test_paper_bounded_baseline.py",
+      "new_path": "paper_experiments\\tests\\test_paper_bounded_baseline.py",
+      "sha256_before": "E738CA65D6064FC342A09318CE3F81943FA08D0182163D7E4B8A8A831AE37037",
+      "sha256_after": "5BBD33E133FA2EA6695B38D2349A14A96279071901873472F7A56A3CE9D4D93D"
+    },
+    {
+      "old_path": "tests\\test_paper_controlled_release_fit.py",
+      "new_path": "paper_experiments\\tests\\test_paper_controlled_release_fit.py",
+      "sha256_before": "20CD0DD6BC4CAF0B4290BF826D99336E16DD193A0F214247E0EA675D5EBDED56",
+      "sha256_after": "D783AFA3F757D95F4684FD4B48680A340C8DCBF17DB4BEE97ECCE051C07CA3F6"
+    },
+    {
+      "old_path": "tests\\test_paper_experiments.py",
+      "new_path": "paper_experiments\\tests\\test_paper_experiments.py",
+      "sha256_before": "4A8FB350D0C111B48045497AE64484785A277380778D31362D807C146495DDC8",
+      "sha256_after": "3CA7D87E49B0D6A48F878930A4436D3C95A63620AF567DC55AC34EB2A583658F"
+    },
+    {
+      "old_path": "tests\\test_paper_fast_parcels.py",
+      "new_path": "paper_experiments\\tests\\test_paper_fast_parcels.py",
+      "sha256_before": "B00E317EB2AB59ED0457B24F99F62F17DF8F93FC4C923216993546C10B04771D",
+      "sha256_after": "8A753DFDA3A3479A6A56F4944388CE2732E8AB3D64DCA2C9061797A6A223EF8F"
+    },
+    {
+      "old_path": "tests\\test_paper_formal_analysis.py",
+      "new_path": "paper_experiments\\tests\\test_paper_formal_analysis.py",
+      "sha256_before": "3107265B7DF5E49D3DD62B4815E069E95D1253EC4A7DF73B811763D4569A427D",
+      "sha256_after": "3C2D3C96E12C2560747073DEF32C93B8F20C01D58335ED302E5222B5EDB90735"
+    },
+    {
+      "old_path": "tests\\test_paper_formal_figures.py",
+      "new_path": "paper_experiments\\tests\\test_paper_formal_figures.py",
+      "sha256_before": "8F60F0FEB4859A32F2AF0F55BA4C35D6D9557D0B47E7565BDC31A8AE0E6B6E77",
+      "sha256_after": "39818AE94960CFF038CBF5488BBAD18F222A991F15E5FD2A245A4BE799648557"
+    },
+    {
+      "old_path": "tests\\test_paper_formal_protocol.py",
+      "new_path": "paper_experiments\\tests\\test_paper_formal_protocol.py",
+      "sha256_before": "D1FD74083F2B830CE8FE137E2E1BF45BEB9777C726B0FD84A6A7B3581506916C",
+      "sha256_after": "C6537096A17579B14E806242FA9A18564CB2C5431D2CDDB389745A9B049E0CCB"
+    },
+    {
+      "old_path": "tests\\test_paper_industrial_analysis.py",
+      "new_path": "paper_experiments\\tests\\test_paper_industrial_analysis.py",
+      "sha256_before": "A238F9A7597DE95FEFF179499F344EFABCC838D2CDEA3F093095FCF3AB2E0191",
+      "sha256_after": "3A22BD5A482A0C177E92439E1ABCF5E9AA74C1BFC460C1D790B3156A56768C18"
+    },
+    {
+      "old_path": "tests\\test_paper_industrial_preparation.py",
+      "new_path": "paper_experiments\\tests\\test_paper_industrial_preparation.py",
+      "sha256_before": "30EA8D8DB2BB29B0D0C589D46C4921EEA7EDDF9C2731A292D510983589BA7E96",
+      "sha256_after": "5195C18572277F7477349B71B97F933EA069ACA7A5B7E557AC787BF21A30DD75"
+    },
+    {
+      "old_path": "tests\\test_paper_industrial_representatives.py",
+      "new_path": "paper_experiments\\tests\\test_paper_industrial_representatives.py",
+      "sha256_before": "77DB5CF5768B8D8F8EE9C3ABD58CEE8D07068AA1C7F5F568399B5DA6CF96AEF3",
+      "sha256_after": "FA48665C3E665C31B87D2D7E2B42D0AEAB2F2159B085F12BF456BA8777D1EA7C"
+    },
+    {
+      "old_path": "tests\\test_paper_industrial_transport.py",
+      "new_path": "paper_experiments\\tests\\test_paper_industrial_transport.py",
+      "sha256_before": "0014B8E569CEF29C42D4F5FD286652A2AA7352225F55C1E5CEC87B094C768253",
+      "sha256_after": "45A23658D84008535BF5D8852CFE1F2A59FDB8D50BD12DF47460446DD4910ABF"
+    },
+    {
+      "old_path": "tests\\test_paper_observation_operators.py",
+      "new_path": "paper_experiments\\tests\\test_paper_observation_operators.py",
+      "sha256_before": "618A25661345CCB2FC3C0FFA4E5BFB8A1770525CF362BDD7BB9A992FD873E8E1",
+      "sha256_after": "9B15770E4D27F647F015000C7B4691C2342BDBC501D6FD57A3090E3A1C21B650"
+    },
+    {
+      "old_path": "tests\\test_paper_physical_beam_adapter.py",
+      "new_path": "paper_experiments\\tests\\test_paper_physical_beam_adapter.py",
+      "sha256_before": "A8FD3F0BDBC19B36B57F5242C50C99A5EB08F265FB1C8FBFA9CAE036FCD824AA",
+      "sha256_after": "80369EF6690888FA3752A7886AEE71BD6B872B758D29FD1676CDF371DF2D7FEF"
+    },
+    {
+      "old_path": "tests\\test_paper_probabilistic_demo.py",
+      "new_path": "paper_experiments\\tests\\test_paper_probabilistic_demo.py",
+      "sha256_before": "85F91F435ABA07BE8F6CD996D0815D084F05337C6F8BF5D28367EA8821A5A249",
+      "sha256_after": "66AEF351E5B32B644FECD4257F48E44ACBA7088B9BBD08DFB08FDE7FF9E115CD"
+    },
+    {
+      "old_path": "tests\\test_paper_reference_transport.py",
+      "new_path": "paper_experiments\\tests\\test_paper_reference_transport.py",
+      "sha256_before": "8ECCA7F8A81059A637EC5447CD6D2536E2CF58B4446E21B4B5EF5484FDBF23E4",
+      "sha256_after": "D4E3596551E80F9108201416C1182BD5C1A39991B5E947A7228AE055D11F3E96"
+    },
+    {
+      "old_path": "tests\\test_paper_scaled_inner_q.py",
+      "new_path": "paper_experiments\\tests\\test_paper_scaled_inner_q.py",
+      "sha256_before": "B9DB941543047B45B5CE1948020FF844FD31534BBE275F823E526F01C160CE7B",
+      "sha256_after": "38A2ED732C7FE5466E18EFE314D192FC1CD705FF32682596FA72CD589B587794"
+    },
+    {
+      "old_path": "tests\\test_paper_shared_forward.py",
+      "new_path": "paper_experiments\\tests\\test_paper_shared_forward.py",
+      "sha256_before": "4199D21141F75219BC30CA9B5B259580824B142FC50099CF51099D8767D091F4",
+      "sha256_after": "BF82677168F43366177747C2C1ABE504981291DE712C1D9640879598D7637A48"
+    },
+    {
+      "old_path": "tests\\test_paper_steady_beam_baseline.py",
+      "new_path": "paper_experiments\\tests\\test_paper_steady_beam_baseline.py",
+      "sha256_before": "C6DEA931A7DE416205A8AB273A70B132C8DA9547C4414481EA41BA017F070958",
+      "sha256_after": "83E26E7A132BA38ECE259F48A5BAF710531A9118C418F8A6D33A92E01D02D1D1"
+    },
+    {
+      "old_path": "tests\\test_paper_supplement_extension.py",
+      "new_path": "paper_experiments\\tests\\test_paper_supplement_extension.py",
+      "sha256_before": "310F73740AF2BBCA013632801CE53A979C24E492E8E7B9A0F6D8DDF5C45404BF",
+      "sha256_after": "F82FA3E84CC05D8EAC2C833E77644B44C648C1A2ED888252A953B563EA49E254"
+    },
+    {
+      "old_path": "tests\\test_paper_uncertainty_calibration.py",
+      "new_path": "paper_experiments\\tests\\test_paper_uncertainty_calibration.py",
+      "sha256_before": "6C90836BBEF938F54CF169589CF6650B9514819C649EB19F04870CE53DE34090",
+      "sha256_after": "7FA670EE38705CFED058C803388ACCA4181EC2D4C1A65CC24655AF575D11DB57"
+    },
+    {
+      "old_path": "tests\\test_paper_writing_data.py",
+      "new_path": "paper_experiments\\tests\\test_paper_writing_data.py",
+      "sha256_before": "C9991B75C6C4FBBFFA5DF62AE8352C018CFF8F06BDC4C2FD867469C7482B85A7",
+      "sha256_after": "3021320C795C39A690E8B770237CA32D977D57AD46066DF018D137736C3DF51D"
+    }
+  ]
+}

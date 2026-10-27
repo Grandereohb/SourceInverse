@@ -25,7 +25,7 @@ def relative_prediction_change(prediction, reference):
     return float(np.linalg.norm(prediction-reference)/max(np.linalg.norm(reference), np.finfo(float).tiny))
 
 
-def verify(study):
+def verify(study, device='cpu'):
     study = Path(study)
     protocol = json.loads((study/'protocol.json').read_text(encoding='utf-8'))
     if protocol['technical_smoke']:
@@ -40,17 +40,17 @@ def verify(study):
                 continue
             result = json.loads(path.read_text(encoding='utf-8'))
             model, xyt, basis, response, observed, observations = physical.configure(height,
-                device='cpu', dtype=torch.float64, q_count=1, time_order=32, release_order=32,
+                device=device, dtype=torch.float64, q_count=1, time_order=32, release_order=32,
                 beam_solver='analytic', data_dir=ROOT/'controlled_release_preparation_v2'/name)
             if len(observed) != result['observations']:
                 raise ValueError('Numerical replay changed the observation window')
             for method, fits in result['methods'].items():
                 for fit in fits.get('replicates', [fits]):
                     parameters = torch.tensor([*fit['source_norm'], fit['diffusion_norm'][1],
-                        fit['diffusion_norm'][0]-fit['diffusion_norm'][1]], dtype=torch.float64)
+                        fit['diffusion_norm'][0]-fit['diffusion_norm'][1]], dtype=torch.float64, device=device)
                     with torch.no_grad():
                         matrix = response(model, 0., xyt, basis, physical_parameters=parameters)
-                    prediction = matrix.numpy()@np.asarray(fit['coefficients'])
+                    prediction = matrix.cpu().numpy()@np.asarray(fit['coefficients'])
                     change = relative_prediction_change(fit['prediction'], prediction)
                     rows.append(dict(event=name, height_m=height, method=method, seed=fit.get('seed'),
                         result_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
@@ -69,6 +69,7 @@ def verify(study):
         fitted_outputs_checked=len(rows), gate_relative_prediction_change=.01,
         passed=sum(row['gate_passed'] for row in rows), failed=sum(not row['gate_passed'] for row in rows),
         parameters_refitted=False, threshold_tuned=False,
+        device=device,
         interpretation='finite higher-order reference, not exact physical truth or source-location validation')
     (output/'quadrature_replay_status.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     return report
@@ -77,4 +78,6 @@ def verify(study):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--study', type=Path, default=ROOT/'beam_comparison_cuda_v1')
-    print(json.dumps(verify(parser.parse_args().study), indent=2))
+    parser.add_argument('--device', choices=('cpu', 'cuda'), default='cpu')
+    args = parser.parse_args()
+    print(json.dumps(verify(args.study, args.device), indent=2))

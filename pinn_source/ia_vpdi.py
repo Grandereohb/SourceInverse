@@ -58,6 +58,8 @@ class IAVPDIRefinementRun:
     trajectory: list = field(default_factory=list)
     forward_count: int = 0
     inner_solve_count: int = 0
+    outer_solver: str = "adam"
+    optimizer_details: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -117,6 +119,7 @@ class IAVPDIResult:
     inner_solve_count: int = 0
     final_layout_candidates: tuple = ()
     timing: dict = field(default_factory=dict)
+    capacity_selection: dict = field(default_factory=dict)
 
 
 def _profile_inversion(function):
@@ -319,6 +322,7 @@ def refine_profiled_candidate(
     run_id=0,
     q_upper_bound=np.inf,
     optimize_diffusion=True,
+    outer_solver="adam",
 ):
     """Refine theta with the envelope gradient while re-solving NNLS each step.
 
@@ -326,6 +330,16 @@ def refine_profiled_candidate(
     set is unchanged. Active-set switches make the profiled objective piecewise
     smooth; SciPy itself is intentionally outside autograd.
     """
+    if outer_solver == "trf":
+        try:
+            return _refine_reduced_trf(model, sigma_src, observation_xyt, observations,
+                q_basis, start, source_x_bounds, source_y_bounds, weights, steps,
+                run_id, q_upper_bound, optimize_diffusion)
+        except Exception as exc:
+            return IAVPDIRefinementRun(int(run_id), start, None, False, 0,
+                                      str(exc), outer_solver="trf")
+    if outer_solver != "adam":
+        raise ValueError("Unknown IA outer solver: " + str(outer_solver))
     set_model_anisotropic_diffusion_norm(
         model, start.diffusion_parallel_norm, start.diffusion_perp_norm
     )
@@ -466,6 +480,81 @@ def refine_profiled_candidate(
     finally:
         for param, requires_grad in zip(params, previous_requires):
             param.requires_grad_(requires_grad)
+
+
+def _refine_reduced_trf(model, sigma_src, xyt, observations, basis, start,
+                        x_bounds, y_bounds, weights, steps, run_id, q_cap,
+                        optimize_diffusion):
+    from reduced_trust_region import fit_reduced_trust_region
+
+    params = [model.xs, model.ys, model.rawD_perp, model.rawD_parallel_delta]
+    requires = [p.requires_grad for p in params]
+    initial = np.array([start.source_x, start.source_y, start.diffusion_perp_norm,
+                        start.diffusion_parallel_norm-start.diffusion_perp_norm])
+    scale = float(getattr(model, 'recurrent_d_scale_norm', 1.))
+    minimum = float(getattr(model, 'recurrent_d_perp_min_norm', 0.))
+    delta_min = max(0., float(getattr(model, 'recurrent_d_parallel_min_norm', 0.))-minimum)
+    lower = np.array([x_bounds[0], y_bounds[0], minimum+scale*1.001e-6,
+                      delta_min+scale*1e-12])
+    upper = np.array([x_bounds[1], y_bounds[1], np.inf, np.inf])
+    size = 4 if optimize_diffusion else 2
+    basis_np = np.asarray(basis.detach().cpu() if isinstance(basis, torch.Tensor) else basis)
+    trajectory = []
+    try:
+        for p in params:
+            p.requires_grad_(True)
+
+        def response(values, jacobian):
+            theta = initial.copy()
+            theta[:size] = values
+            with temporary_source_and_diffusion(model, theta[0], theta[1],
+                                                 theta[2]+theta[3], theta[2]):
+                matrix = build_response_matrix(model, sigma_src, xyt, basis,
+                                                track_gradients=jacobian)
+                result = matrix.detach().cpu().numpy().astype(float)
+                if not jacobian:
+                    return result
+                raw = _prediction_jacobian_raw(model, matrix.reshape(-1))
+                mapping = _raw_to_physical_jacobian(model).detach()
+                # Existing mapping is (D_parallel,D_perp); optimize (D_perp,contrast).
+                physical = torch.stack((mapping[1], mapping[0]-mapping[1]))
+                diffusion_derivative = torch.linalg.solve(physical.double().T,
+                    raw[:, 2:].double().T).T
+                derivative = torch.cat((raw[:, :2].double(), diffusion_derivative), dim=1)
+                return result, derivative[:, :size].reshape(*matrix.shape, size).detach().cpu().numpy()
+
+        observed_np = np.asarray(observations.detach().cpu()
+            if isinstance(observations, torch.Tensor) else observations)
+        fit = fit_reduced_trust_region(response, observed_np,
+            [np.maximum(initial[:size], lower[:size])], lower[:size], upper[:size],
+            weights=_weights_numpy(weights, observed_np.size),
+            q_upper_bound=q_cap, max_nfev=max(1, int(steps)),
+            coordinate_scale=np.r_[np.ones(2), np.maximum(initial[2:], scale*1e-3)][:size])
+        theta = initial.copy()
+        theta[:size] = fit['theta']
+        coefficients = fit['coefficients']
+        best = replace(start, source_x=float(theta[0]), source_y=float(theta[1]),
+            diffusion_parallel_norm=float(theta[2]+theta[3]), diffusion_perp_norm=float(theta[2]),
+            coefficients=coefficients, q_integration=basis_np@coefficients,
+            prediction=fit['prediction'], weighted_sse=fit['sse'],
+            profile_score=fit['sse']/len(fit['prediction']),
+            response_rank=fit['response_rank'], response_condition=fit['response_condition'],
+            solver_success=True, solver_status=1, solver_message='bounded Q solved by equilibrated BVLS')
+        set_model_anisotropic_diffusion_norm(model, theta[2]+theta[3], theta[2])
+        with torch.no_grad():
+            model.xs.fill_(theta[0])
+            model.ys.fill_(theta[1])
+        trajectory = [dict(run_id=int(run_id), step=i+1,
+            profile_score=row['sse']/len(fit['prediction']), source_x=row['theta'][0],
+            source_y=row['theta'][1]) for i, row in enumerate(fit['trace'])]
+        details = {key: fit[key] for key in ('optimizer_runs', 'coordinate_scale', 'converged')}
+        return IAVPDIRefinementRun(int(run_id), start, best, True, len(trajectory),
+            'Reduced TRF finished; convergence flag is separate from finite-fit success',
+            trajectory, fit['response_matrix_calls']*basis_np.shape[1],
+            fit['inner_solve_count'], 'trf', details)
+    finally:
+        for p, flag in zip(params, requires):
+            p.requires_grad_(flag)
 
 
 def _prediction_jacobian_raw(model, prediction, batch_size=None):
@@ -815,8 +904,15 @@ def run_ia_vpdi(
     start_strategy="score",
     start_min_distance=0.0,
     q_layout_strategy="uniform",
+    outer_solver="adam",
+    q_capacity_selection="fixed",
+    q_capacity_counts=(1, 3, 5),
 ):
     started = time.perf_counter()
+    if outer_solver not in ("adam", "trf"):
+        raise ValueError("Unknown IA outer solver: " + str(outer_solver))
+    if q_capacity_selection not in ("fixed", "bic"):
+        raise ValueError("Unknown Q capacity selection: " + str(q_capacity_selection))
     if np.isnan(q_upper_bound) or q_upper_bound <= 0:
         raise ValueError("q_upper_bound must be positive or infinity.")
     select_refinement_starts((), top_k, start_strategy, start_min_distance)
@@ -826,12 +922,24 @@ def run_ia_vpdi(
     if q_layout_strategy not in ("uniform", "local_templates"):
         raise ValueError("Unknown Q layout strategy.")
     family = None
+    if q_capacity_selection == "bic":
+        from q_capacity import build_capacity_family, gaussian_bic
+        if q_knots is not None or q_layout_strategy != "uniform" or q_basis_type != "hat":
+            raise ValueError("BIC capacity selection requires uniform hats without custom knots")
+        family = build_capacity_family(model.recurrent_integration_times, q_capacity_counts)
+        n_obs = int(np.asarray(observations.detach().cpu()
+            if isinstance(observations, torch.Tensor) else observations).size)
+        gaussian_bic(1., n_obs, 4+max(q_capacity_counts))
     if q_layout_strategy == "local_templates":
         if q_knots is not None or q_basis_type != "hat":
             raise ValueError("Local templates require hat basis without custom knots.")
         family = build_release_layout_family(model.recurrent_integration_times,
                                             model.recurrent_times, basis_count)
     layouts = {} if family is None else {layout.layout_id: layout for layout in family.layouts}
+    def selection_score(candidate):
+        if q_capacity_selection == "bic":
+            return gaussian_bic(candidate.weighted_sse, n_obs, 4+len(candidate.coefficients))
+        return candidate.profile_score
     grid = generate_candidate_grid(source_x_bounds, source_y_bounds, search_step)
     seeds = build_diffusion_seeds(model, diffusion_scale_seeds, diffusion_ratio_seeds)
     coarse = []
@@ -856,13 +964,21 @@ def run_ia_vpdi(
                     print(f"IA-VPDI coarse: {evaluated}/{total}, elapsed={time.perf_counter()-coarse_started:.1f}s", flush=True)
                 valid_here = [c for c in candidates if c.solver_success and np.isfinite(c.profile_score)]
                 if valid_here:
-                    selection_pool.append(min(valid_here, key=lambda item: item.profile_score))
+                    if q_capacity_selection == "bic":
+                        selection_pool.extend(valid_here)
+                    else:
+                        selection_pool.append(min(valid_here, key=lambda item: item.profile_score))
     coarse.sort(key=lambda item: item.profile_score)
     valid = [item for item in coarse if item.solver_success and np.isfinite(item.profile_score)]
     if not valid:
         raise RuntimeError("No valid profiled candidates.")
     selection_pool.sort(key=lambda item: item.profile_score)
-    starts = select_refinement_starts(selection_pool, top_k, start_strategy, start_min_distance)
+    if q_capacity_selection == "bic":
+        starts = tuple(start for layout in family.layouts for start in select_refinement_starts(
+            [c for c in selection_pool if c.layout_id == layout.layout_id],
+            top_k, start_strategy, start_min_distance))
+    else:
+        starts = select_refinement_starts(selection_pool, top_k, start_strategy, start_min_distance)
     runs = []
     with timing_stage('refinement', model.xs.device):
         for run_id, start in enumerate(starts, 1):
@@ -872,10 +988,11 @@ def run_ia_vpdi(
                 q_basis if family is None else layouts[start.layout_id].basis, start,
                 source_x_bounds, source_y_bounds, weights, outer_steps, outer_lr,
                 outer_patience, outer_min_delta, max_grad_norm, run_id, q_upper_bound,
+                outer_solver=outer_solver,
             ))
             print(f"IA-VPDI refine done: steps={runs[-1].steps}, success={runs[-1].success}", flush=True)
     successful = [run.best for run in runs if run.success and run.best is not None]
-    best = min(successful or starts, key=lambda item: item.profile_score)
+    best = min(successful or starts, key=selection_score)
     additional_forwards = 0
     additional_solves = 0
     final_layout_candidates = []
@@ -891,7 +1008,7 @@ def run_ia_vpdi(
             additional_solves += len(rescored)
             final_layout_candidates.extend(rescored)
             final_pool.extend(c for c in rescored if c.solver_success and np.isfinite(c.profile_score))
-        best = min(final_pool, key=lambda item: item.profile_score)
+        best = min(final_pool, key=selection_score)
         selected = layouts[best.layout_id]
         q_basis = selected.basis
         q_knots = selected.knots
@@ -907,6 +1024,16 @@ def run_ia_vpdi(
     with torch.no_grad():
         model.xs.fill_(best.source_x)
         model.ys.fill_(best.source_y)
+    capacity_report = {}
+    if q_capacity_selection == "bic":
+        pool = [*coarse, *successful, *final_layout_candidates, best]
+        capacity_report = dict(mode="bic", selected_count=len(best.coefficients),
+            selected_bic=selection_score(best), criterion="n*log(SSE/n)+(4+Q_count)*log(n)",
+            observations=n_obs, models=[dict(q_basis_count=count,
+                best_bic=min(selection_score(c) for c in pool if len(c.coefficients) == count
+                             and c.solver_success)) for count in sorted(q_capacity_counts)],
+            note="All observations used; working Gaussian BIC, approximate at bounds or rank loss. "
+                 "Spatial diagnostics are conditional on selected Q capacity.")
     return IAVPDIResult(
         best=best,
         coarse_candidates=tuple(coarse),
@@ -923,6 +1050,7 @@ def run_ia_vpdi(
         start_strategy=start_strategy,
         start_min_distance=float(start_min_distance),
         q_layout_strategy=q_layout_strategy,
+        capacity_selection=capacity_report,
         layout_definitions=tuple({"layout_id": layout.layout_id, "knots": list(layout.knots)}
                                  for layout in (() if family is None else family.layouts)),
         inner_solve_count=len(coarse) + additional_solves + sum(run.inner_solve_count for run in runs),
@@ -973,6 +1101,9 @@ def sampled_profile_stability(result, *, length_m=None, source_bounds=None,
     pool = list(result.coarse_candidates) + [result.best]
     pool.extend(run.best for run in result.refinement_runs if run.success and run.best is not None)
     pool.extend(result.final_layout_candidates)
+    if result.capacity_selection:
+        # Different model dimensions are compared by BIC, not an MSE tolerance.
+        pool = [c for c in pool if c.layout_id == result.best.layout_id]
     pool = list({id(candidate): candidate for candidate in pool}.values())
     valid, excluded = [], 0
     for candidate in pool:
@@ -1021,6 +1152,7 @@ def sampled_profile_stability(result, *, length_m=None, source_bounds=None,
     if lowest < reference_score-1e-12*max(1., abs(reference_score)):
         warnings.append("An already evaluated candidate has a lower score than the selected solution; selection was not changed by reporting.")
     return {"reference_selected_score": reference_score, "lowest_evaluated_score": float(lowest),
+        "conditioned_on_q_layout": result.best.layout_id if result.capacity_selection else None,
         "evaluated_record_count": len(pool), "excluded_record_count": excluded,
         "unique_location_count": len(locations), "length_m": length_m,
         "source_bounds_norm": None if bounds is None else bounds.tolist(),
@@ -1080,6 +1212,9 @@ def build_ia_vpdi_diagnostics(result, *, length_m=None, source_bounds=None,
     best = result.best
     report = {
         "mode": "ia_vpdi",
+        "q_capacity_selection": result.capacity_selection or {"mode": "fixed"},
+        "outer_solvers": [run.outer_solver for run in result.refinement_runs],
+        "outer_optimizer_details": [run.optimizer_details for run in result.refinement_runs],
         "best_profiled_score": best.profile_score,
         "q_basis": {"type": result.q_basis_type, "count": int(result.q_basis.shape[1]), "values": result.q_basis.tolist()},
         "q_coefficients": best.coefficients.tolist(),
@@ -1100,6 +1235,7 @@ def build_ia_vpdi_diagnostics(result, *, length_m=None, source_bounds=None,
             "requested_min_distance_norm": result.start_min_distance,
             "initial_sources": [[run.start.source_x, run.start.source_y] for run in result.refinement_runs],
             "run_count": len(result.refinement_runs),
+            "q_basis_count_by_run": [len(run.start.coefficients) for run in result.refinement_runs],
             "successful_count": sum(run.success for run in result.refinement_runs),
             "final_sources": [[run.best.source_x, run.best.source_y] for run in result.refinement_runs if run.best is not None],
         },

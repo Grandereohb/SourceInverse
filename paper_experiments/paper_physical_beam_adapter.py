@@ -8,7 +8,9 @@ fixed per experiment, not selected by fit. Q coefficients have units kg/s.
 """
 
 from contextlib import nullcontext
+import copy
 import math
+from types import SimpleNamespace
 
 import numpy as np
 from numpy.polynomial.legendre import leggauss
@@ -72,7 +74,8 @@ vertical delta-source endpoint rather than introducing an artificial height.
     def __init__(self, edges_s, velocity_xy, starts_m, ends_m, temperatures,
                  pressures, q_clock_s, q_basis, *, height_m, beam_order=32,
                  time_order=4, release_order=4, length_m=100., time_unit_s=60.,
-                 device='cpu', dtype=torch.float64,beam_solver='quadrature'):
+                 device='cpu', dtype=torch.float64,beam_solver='quadrature', max_age_s=None,
+                 source_variance_m2=1/3,release_window_s=None):
         edges, wind, starts, ends, clock, basis = [np.asarray(v, dtype=float) for v in
             (edges_s, velocity_xy, starts_m, ends_m, q_clock_s, q_basis)]
         if (edges.ndim != 1 or len(edges)<2 or edges[0]!=0 or np.any(np.diff(edges)<=0)
@@ -83,13 +86,22 @@ vertical delta-source endpoint rather than introducing an artificial height.
                 or not np.isfinite([height_m,length_m,time_unit_s]).all()
                 or height_m<0 or np.any(starts[:,2]<0) or np.any(ends[:,2]<0)
                 or any(not np.isfinite(v).all() for v in (edges,wind,starts,ends,clock,basis))
-                or np.any(np.linalg.norm(ends-starts,axis=1)==0)
-                or beam_solver not in ('quadrature','analytic')):
+                or (beam_solver!='point' and np.any(np.linalg.norm(ends-starts,axis=1)==0))
+                or (beam_solver=='point' and not np.array_equal(starts,ends))
+                or (max_age_s is not None and (not np.isfinite(max_age_s) or max_age_s<=0))
+                or not np.isfinite(source_variance_m2) or source_variance_m2<0
+                or beam_solver not in ('quadrature','analytic','point')):
             raise ValueError('Invalid finite physical beam/clock/transport specification')
         self.height, self.length, self.d_scale = float(height_m), float(length_m), length_m**2/time_unit_s
         self.minutes, self.beams = len(edges)-1, len(starts)
         self.time_order, self.beam_order = int(time_order), int(beam_order)
         self.beam_solver=beam_solver
+        self.max_age_s=max_age_s
+        self.source_variance_m2=float(source_variance_m2)
+        window=np.asarray([0.,edges[-1]] if release_window_s is None else release_window_s,dtype=float)
+        if window.shape!=(2,) or not np.isfinite(window).all() or not 0<=window[0]<window[1]<=edges[-1]:
+            raise ValueError('Release window must lie inside the supplied observation clock')
+        self.release_window_s=window
         if beam_solver=='analytic' and not np.all(starts[:,2]==ends[:,2]):
             raise ValueError('Analytic horizontal beam mean requires equal endpoint heights')
         self.dtype, self.device = dtype, torch.device(device)
@@ -98,7 +110,7 @@ vertical delta-source endpoint rather than introducing an artificial height.
         tnodes, tweights = leggauss(time_order)
         rnodes, rweights = leggauss(release_order)
         beam_points = starts[:,None,:]+(bnodes[None,:,None]+1)*.5*(ends-starts)[:,None,:]
-        if beam_solver=='analytic':
+        if beam_solver in ('analytic','point'):
             beam_points=starts[:,None,:]
             self.beam_order=1
             bweights=np.array([2.])
@@ -118,7 +130,9 @@ vertical delta-source endpoint rather than introducing an artificial height.
         for minute in range(self.minutes):
             times = .5*(edges[minute]+edges[minute+1])+.5*(edges[minute+1]-edges[minute])*tnodes
             for end in times:
-                breaks = np.unique(np.r_[edges[edges<end], clock[clock<end], end])
+                earliest=0. if max_age_s is None else max(0.,end-max_age_s)
+                breaks = np.unique(np.r_[earliest,edges[(edges>earliest)&(edges<end)],
+                    clock[(clock>earliest)&(clock<end)],window[(window>earliest)&(window<end)],end])
                 roots_left, roots_right = np.sqrt(end-breaks[1:]), np.sqrt(end-breaks[:-1])
                 roots = ((roots_right+roots_left)[:,None]*.5+
                     (roots_right-roots_left)[:,None]*.5*rnodes).ravel()
@@ -126,6 +140,7 @@ vertical delta-source endpoint rather than introducing an artificial height.
                 release = end-age
                 weights = ((roots_right-roots_left)[:,None]*.5*rweights).ravel()*2*roots
                 release_basis = np.column_stack([np.interp(release,clock,basis[:,j]) for j in range(basis.shape[1])])
+                release_basis *= ((release>=window[0])&(release<=window[1]))[:,None]
                 entries.append((age,
                     _integral_at(end,edges,wind)-_integral_at(release,edges,wind),
                     _integral_at(end,edges,parallel)-_integral_at(release,edges,parallel),
@@ -162,7 +177,12 @@ vertical delta-source endpoint rather than introducing an artificial height.
             last = min(first+chunk,self.groups)
             covariance = 2*(dp*self.parallel[first:last]+dq*self.perpendicular[first:last])
             # Same per-axis variance as the documented2m-square release frame.
-            xx, xy, yy = covariance[:,:,0]+1/3, covariance[:,:,1], covariance[:,:,2]+1/3
+            xx, xy, yy = (covariance[:,:,0]+self.source_variance_m2,
+                covariance[:,:,1],covariance[:,:,2]+self.source_variance_m2)
+            valid=self.weighted_basis[first:last].abs().sum(-1)>0
+            xx=torch.where(valid,xx,torch.ones_like(xx))
+            xy=torch.where(valid,xy,torch.zeros_like(xy))
+            yy=torch.where(valid,yy,torch.ones_like(yy))
             delta = self.xy[None,:,None,:]-source-self.displacement[first:last,None,:,:]
             dx,dy = delta[...,0],delta[...,1]
             if self.beam_solver=='analytic':
@@ -196,3 +216,27 @@ class PhysicalBeamResponse:
         if not bool(torch.isfinite(value).all()):
             raise FloatingPointError('Nonfinite physical beam response')
         return value
+
+    def evaluate_population(self, model, sigma, xyt, basis, physical_parameters,
+                            batch_size=4, max_kernel_elements=2_000_000, compute_dtype=None):
+        if not torch.equal(self.xyt, xyt) or not torch.equal(self.basis, basis):
+            raise ValueError('Population queries must match the fixed physical plan')
+        dtype = self.plan.dtype if compute_dtype is None else compute_dtype
+        if not hasattr(self, '_population_plans'):
+            self._population_plans = {}
+        if dtype not in self._population_plans:
+            plan = copy.copy(self.plan)
+            for name, value in vars(self.plan).items():
+                if isinstance(value, torch.Tensor) and torch.is_floating_point(value):
+                    setattr(plan, name, value.to(dtype=dtype))
+            plan.dtype = dtype
+            self._population_plans[dtype] = plan
+        plan = self._population_plans[dtype]
+        values = torch.as_tensor(physical_parameters, device=plan.device, dtype=dtype)
+        carrier = SimpleNamespace(xs=torch.zeros((), device=plan.device, dtype=dtype))
+        with torch.no_grad():
+            output = torch.vmap(lambda p: plan.evaluate(carrier,
+                max_kernel_elements=max(1, max_kernel_elements//batch_size),
+                physical_parameters=p), chunk_size=batch_size)(values)
+        self.calls += len(values)
+        return output

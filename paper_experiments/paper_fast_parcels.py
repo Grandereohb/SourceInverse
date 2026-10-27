@@ -140,7 +140,7 @@ class CachedMeanResponse:
         self.build_seconds=0.
         self.calls=0
 
-    def __call__(self,model,sigma,xyt,basis,track_gradients=False,physical_parameters=None):
+    def _plan(self, model, sigma, xyt, basis):
         if self._model is None or self._model() is not model:
             self._plans.clear()
             self._model=weakref.ref(model)
@@ -164,10 +164,59 @@ class CachedMeanResponse:
             self._plans[key]=ParcelResponsePlan(model,sigma,xyt,model.recurrent_integration_times,
                                                 basis,self.subdivisions)
             self.build_seconds+=time.perf_counter()-started
+        return self._plans[key]
+
+    def __call__(self,model,sigma,xyt,basis,track_gradients=False,physical_parameters=None):
+        plan = self._plan(model, sigma, xyt, basis)
         self.calls+=1
         with torch.enable_grad() if track_gradients else torch.no_grad():
-            response=self._plans[key].evaluate(model,physical_parameters=physical_parameters)
+            response=plan.evaluate(model,physical_parameters=physical_parameters)
         if response.shape[0]!=self.hours*self.samples*self.stations:
             raise ValueError('Mean operator dimensions do not match query rows')
         return response.reshape(self.hours,self.samples,self.stations,-1).mean(1).reshape(
             self.hours*self.stations,-1)
+
+    def evaluate_population(self, model, sigma, xyt, basis, physical_parameters,
+                            batch_size=4, max_kernel_elements=2_000_000, compute_dtype=None):
+        """Same linear response, bounded particle/query batches; no optimizer change."""
+        plan = self._plan(model, sigma, xyt, basis)
+        dtype = plan.dtype if compute_dtype is None else compute_dtype
+        if not hasattr(plan, '_population_arrays'):
+            plan._population_arrays = {}
+        if dtype not in plan._population_arrays:
+            plan._population_arrays[dtype] = {name: getattr(plan, name).to(dtype=dtype)
+                for name in ('parallel', 'perpendicular', 'xy', 'displacement', 'weighted_basis')}
+        arrays = plan._population_arrays[dtype]
+        parameters = torch.as_tensor(physical_parameters, dtype=dtype, device=plan.device)
+        if parameters.ndim != 2 or parameters.shape[1] != 4 or batch_size < 1:
+            raise ValueError('Population must have shape particles x four physical parameters')
+        outputs = []
+        with torch.no_grad():
+            for start in range(0, len(parameters), batch_size):
+                p = parameters[start:start+batch_size]
+                pieces = []
+                chunk = max(1, max_kernel_elements//(len(p)*plan.station_count*plan.release_count))
+                for left in range(0, len(plan.xy), chunk):
+                    right = left+chunk
+                    covariance = 2*((p[:, 2]+p[:, 3])[:, None, None, None]*arrays['parallel'][None, left:right]
+                        + p[:, 2, None, None, None]*arrays['perpendicular'][None, left:right])
+                    xx = covariance[..., 0]+plan.width**2
+                    xy = covariance[..., 1]
+                    yy = covariance[..., 2]+plan.width**2
+                    det = xx*yy-xy*xy
+                    if bool((det <= 0).any()):
+                        raise FloatingPointError('Nonpositive population covariance')
+                    delta = (arrays['xy'][None, left:right, :, None, :]-p[:, None, None, None, :2]
+                             -arrays['displacement'][None, left:right, None, :, :])
+                    dx, dy = delta[..., 0], delta[..., 1]
+                    exponent = (yy[:, :, None, :]*dx**2+xx[:, :, None, :]*dy**2
+                        -2*xy[:, :, None, :]*dx*dy)/det[:, :, None, :]
+                    kernel = torch.exp(-.5*exponent)/(2*math.pi*torch.sqrt(det[:, :, None, :]))
+                    pieces.append(torch.einsum('ptsr,trb->ptsb', kernel, arrays['weighted_basis'][left:right]))
+                value = RECURRENT_SOURCE_SCALE*torch.cat(pieces, dim=1).reshape(len(p), -1, basis.shape[1])[:, plan.valid_flat]
+                output = value.new_zeros((len(p), plan.query_count, value.shape[-1]))
+                output.index_copy_(1, plan.output_indexes, value)
+                outputs.append(output.reshape(len(p), self.hours, self.samples, self.stations, -1)
+                    .mean(2).reshape(len(p), self.hours*self.stations, -1))
+        self.calls += len(parameters)
+        return torch.cat(outputs)

@@ -99,7 +99,9 @@ def analyze(study, references_path):
     report = dict(final=completed == len(status) and not protocol['technical_smoke'],
                   completed_event_heights=completed, planned_event_heights=len(status),
                   case_method_rows=len(rows), raw_replicate_rows=len(raw),
-                  pso_summary='within-event-height median of all fixed seeds, never best seed',
+                  pso_summary=('within-event-height median of all fixed seeds, never best seed'
+                      if 'standard_gbest_pso' in protocol['methods'] else
+                      'PSO not included in this public cohort; updated PSO is in the synthetic comparison'),
                   grouping='eight windows at two source locations; heights are sensitivity analyses, not replicates',
                   q_reference='existing independent per-window measured references only; absent references stay missing',
                   newman_scope='separate author-forward comparison; not mixed into common-forward optimizer ranking')

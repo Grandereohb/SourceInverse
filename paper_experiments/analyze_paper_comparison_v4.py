@@ -49,6 +49,7 @@ def method_rows(record):
             replicates.append(dict(identity, method=method, seed=fit.get('seed'),
                 **{key: float(fit[key]) for key in METRICS}))
         row = dict(identity, method=method, replicates=len(fits),
+            q_basis_count=fits[0].get('q_basis_count', len(fits[0].get('coefficients', []))),
             source_at_boundary=bool(any(fit['source_at_boundary'] for fit in fits)),
             optimizer_converged=value.get('converged'),
             seconds_all_replicates=float(sum(fit['seconds'] for fit in fits)))
@@ -128,6 +129,8 @@ def analyze(study):
             (destination/'calibration.json').write_text(json.dumps(dict(
                 threshold=threshold, axis_scale=float(np.sqrt(threshold/5.991)),
                 retrospective=True, calibration_cases=48, validation_cases=48,
+                unavailable_policy='positive-infinity calibration score; retained denominator; no ellipse counted as covered',
+                defined_calibration_cases=int(calibrated.loc[calibrated.partition == 'calibration', 'available'].sum()),
                 station_or_time_withholding=False), indent=2), encoding='utf-8')
     report = dict(final=final, planned_cases=len(protocol['cases']),
         reliability_final=reliability_final,

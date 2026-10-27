@@ -37,6 +37,20 @@ class CalibrationTests(unittest.TestCase):
         self.assertEqual(len(scenarios['surround5_pulse']['stations']),5)
         self.assertEqual(len(scenarios['corridor6_double_peak']['stations']),6)
 
+    def test_unavailable_case_keeps_fixed_denominator_and_infinite_score(self):
+        rows=[dict(case_id=f'case_{i}',cohort='nominal',diagnostic='eliminate_Q_D',
+            network='five' if i%2 else 'six',repeat=i//12,available=True,
+            mahalanobis_squared=float(i+1),major_m=10.) for i in range(96)]
+        rows[0].update(available=False, mahalanobis_squared=np.nan, major_m=np.nan)
+        cases, summary, threshold = calibration.calibrate(pd.DataFrame(rows))
+        self.assertEqual(len(cases), 96)
+        self.assertEqual(threshold, 48.)
+        self.assertTrue(np.isinf(cases.loc[0, 'calibration_score']))
+        self.assertFalse(cases.loc[0, 'calibrated_contains_truth'])
+        group = summary[(summary.partition == 'calibration') & (summary.network == 'all')].iloc[0]
+        self.assertEqual(group.n, 48)
+        self.assertEqual(group.defined_ellipses, 47)
+
 
 if __name__=='__main__':
     unittest.main()

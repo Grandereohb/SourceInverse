@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]/'result/paper_experiments_20261017'
 METHODS = dict(ia_vpdi='IA-VPDI', joint_nls_trf='Joint NLS',
                standard_gbest_pso='标准 PSO', matched_joint_adam='联合 Adam')
 NETWORKS = dict(ideal5='理想五站', jjj6='实际六站几何',
-                surround5_pulse='环绕五站脉冲', corridor6_double_peak='走廊六站双峰')
+                surround5_pulse='环绕五站几何', corridor6_double_peak='走廊六站几何')
 FIGURES = ('synthetic_localization', 'synthetic_release_cost',
            'localization_reliability', 'public_release_localization')
 
@@ -49,7 +49,8 @@ def check_inputs(synthetic, public, newman, figures, allow_numerical_warnings=Fa
             groups = frame.groupby(['event', 'height_m'])
         if actual != expected:
             missing.append(label+' case identities incomplete')
-        if any(set(group.method) != set(METHODS) or len(group) != len(METHODS)
+        expected_methods = set(protocol.get('methods', METHODS))
+        if any(set(group.method) != expected_methods or len(group) != len(expected_methods)
                for _, group in groups):
             missing.append(label+' per-case method rows incomplete or duplicated')
         sources.append(metrics)
@@ -71,6 +72,24 @@ def check_inputs(synthetic, public, newman, figures, allow_numerical_warnings=Fa
     alternatives_status = synthetic/'analysis/alternatives_status.json'
     if not alternatives_status.exists() or not json.loads(alternatives_status.read_text(encoding='utf-8'))['final']:
         missing.append('finite candidate-pool diagnostics incomplete')
+    if protocols['synthetic'].get('q_capacity_selection') == 'bic':
+        ablation = synthetic.parent.parent/'solver_upgrade_full_ia_v2/comparison.csv'
+        if not ablation.exists():
+            missing.append('fixed-capacity reduced-TRF ablation missing')
+        else:
+            sources.append(ablation)
+        control = synthetic.parent/'capacity_control'
+        if not (control/'status.json').exists() or not json.loads((control/'status.json').read_text())['final']:
+            missing.append('matched release-capacity control incomplete')
+        else:
+            design = json.loads((control/'protocol.json').read_text(encoding='utf-8'))
+            control_frame = pd.read_csv(control/'comparison.csv')
+            expected = {item['case']['case_id'] for item in design['cases']}
+            if (set(control_frame.case_id) != expected or len(expected) != 24
+                    or any(len(g) != 2 or set(g.method) != {'ia_vpdi_bic', 'joint_nls_bic'}
+                           for _, g in control_frame.groupby('case_id'))):
+                missing.append('matched release-capacity control rows incomplete or duplicated')
+            sources.extend((control/'comparison.csv', control/'protocol.json'))
     newman_records = []
     for event, height in sorted({(item['source'].replace('_', '')+'_'+item['release'], h)
             for item in protocols['public']['events'] for h in protocols['public']['heights_m']}):
@@ -126,6 +145,8 @@ def build(synthetic, public, newman, figures, output, allow_numerical_warnings=F
 
     frame = pd.read_csv(synthetic/'analysis/case_metrics.csv')
     beam = pd.read_csv(public/'analysis/case_metrics.csv')
+    public_methods = {k: v for k, v in METHODS.items() if k in set(beam.method)}
+    updated = json.loads((synthetic/'protocol.json').read_text(encoding='utf-8')).get('q_capacity_selection') == 'bic'
     document = Document()
     section = document.sections[0]
     section.page_width, section.page_height = Cm(21), Cm(29.7)
@@ -152,20 +173,34 @@ def build(synthetic, public, newman, figures, output, allow_numerical_warnings=F
     paragraph(document, date.today().strftime('%Y年%m月%d日')+'  供论文写作核对', size=10)
     paragraph(document, '本报告采用既有实验输入，更新IA-VPDI与Joint NLS、标准PSO的共同正演比较，'
         '保留联合Adam消融，并使用Newman等2025年作者Gaussian plume及M-MALA-within-Gibbs进行公开释放比较。'
-        '下面依照上一版报告，按实验目的、测试内容、对比方法和数据结果组织；未新增算法优化实验。')
+        '下面按实验目的、测试内容、对比方法和数据结果组织。'+
+        ('新版IA使用尺度化约化信赖域及常量、三帽、五帽释放容量选择；完整保留旧对照和全部案例。'
+         if updated else '未新增算法优化实验。'))
     paragraph(document, '章节映射：本报告4.2、4.3、4.4对应原实验计划中的4.1合成评价、4.2可靠性、'
         '4.3公开释放；4.1统一列出实验设置。历史结果保留，不与新边界下的数据混合排名。', size=10)
     heading(document, '4.1 实验设置与评价方法')
     table(document, ['方法', '待估变量', '求解方式'], [
-        ['IA-VPDI', '位置 扩散与非负Q系数', '内层非负最小二乘 外层Adam'],
+        ['IA-VPDI', '位置 扩散与非负Q系数',
+         'Q消元 约化TRF及BIC容量选择' if updated else '内层非负最小二乘 外层Adam'],
         ['Joint NLS', '位置 扩散与非负Q系数', 'SciPy TRF联合约束最小二乘'],
         ['标准 PSO', '位置 扩散与非负Q系数', 'PySwarms固定系数GlobalBestPSO'],
         ['联合 Adam', '位置 扩散与非负Q系数', '共同正演的联合优化消融'],
         ['Newman 2025', '位置 排放 扩散及背景等', '作者Gaussian plume及M-MALA-within-Gibbs']], [3.0, 5.4, 9.0])
-    paragraph(document, '共同正演比较：216例使用相同观测、5个hat源强基、有限参数域和两个原共同粗初值。'
+    if updated:
+        paragraph(document, '216例使用相同观测、共同五帽函数输运空间、有限参数域和两个原共同粗初值。'
+            'IA在常量、三帽、五帽嵌套子空间分别用约化TRF求解，以Gaussian工作模型BIC选择容量，'
+            '每模型每起点最多250次函数评价；原固定五参数NLS和联合Adam保留。'
+            '另设每组几何按冻结协议顺序取6例的24例同容量NLS对照，区分模型选择与求解器收益。'
+            'BIC使用全部观测，不按真实释放类型选容量；本批次为开发性完整复核，不另称全新独立测试集。')
+        paragraph(document, '标准PSO采用PySwarms固定系数GlobalBestPSO，每种子32粒子256代、3个预设种子。'
+            '75%粒子使用共同初值及局部扰动，其余全域初始化；按物理尺度限速、零初速度。'
+            '粒子群前向使用单精度加速，最终以双精度原正演回放，目标值相对差须不超过0.01%。'
+            '不使用NNLS消元或NLS局部精修。IA多容量增加预算，不能把记录耗时视为隔离等预算基准。')
+    else:
+        paragraph(document, '共同正演比较：216例使用相同观测、5个hat源强基、有限参数域和两个原共同粗初值。'
         'IA及Adam各起点1000步；NLS各起点最多500次函数评估，并计实际Jacobian调用；'
         'PSO每种子32粒子64代，共3个预设种子，保留全部重复。不同更新次数不等价FLOPs；'
-        '报告时间为复用共同粗初值后的条件求解时间，不包括重新执行全域粗搜索。')
+            '报告时间为复用共同粗初值后的条件求解时间，不包括重新执行全域粗搜索。')
     paragraph(document, 'PSO先在每个案例内对三种子的指标取中位数，再汇总案例，不取最好种子。'
         '所有位置边界来自既有搜索场地，源强上界由观测初始化确定，不使用真源位置或真源强。'
         '定位误差为估计与已知源的平面欧氏距离，源强重建单独评价。表中中心与区间均为中位数和四分位区间。')
@@ -174,6 +209,15 @@ def build(synthetic, public, newman, figures, output, allow_numerical_warnings=F
     paragraph(document, '目的：在正演和输入一致时比较不同求解策略，并考察既有站网、风场与释放过程中的表现。'
         '192例名义条件覆盖四个场景，每场景48例；另保留12例风场失配和12例源强形状失配。'
         '实际六站仅沿用真实站网几何，浓度、源点和源强真值仍由合成输入给定。')
+    if updated:
+        paragraph(document, '合成真值采用独立实现对连续释放的各向异性平流扩散响应做高精度积分，'
+            '包含时变风、非负源强和衰减，并完成时间与释放求积加密核查。'
+            '六个小时平均浓度按峰值归一后加入标准差0.01的高斯噪声；源点与源强真值由生成过程保存，'
+            '不从高值站推定。反演使用共同的输运响应与观测平均算子；名义条件检验匹配物理假设下的求解能力，'
+            '风场与释放形状失配另列。合成Q为模型单位，只比较相对重建误差，不解释为实测kg/h。', size=9)
+        paragraph(document, '理想五站与实际六站各为两类风场×三类释放过程×8次随机重复；'
+            '环绕五站固定为稳态风下单峰释放48例，走廊六站固定为转向风下双峰释放48例。'
+            '后两组是专门场景，不把四组共同描述为完整因子设计。', size=9)
     nominal = frame[frame.cohort == 'nominal']
     for network, label in NETWORKS.items():
         subset = nominal[nominal.network == network]
@@ -186,6 +230,12 @@ def build(synthetic, public, newman, figures, output, allow_numerical_warnings=F
         f'{label} {frame.loc[frame.method == method, "localization_error_m"].median():.1f} m'
         for method, label in METHODS.items())+'。这组总体统计仅用于描述固定样本；'
         '场景同时改变几何、风场或释放过程，不作为单一因素的因果效应。', bold=True)
+    if updated:
+        table(document, ['方法', '定位中位 m', '定位均值 m', 'Q中位误差 %', 'Q均值误差 %'], [
+            [label, f'{group.localization_error_m.median():.2f}',
+             f'{group.localization_error_m.mean():.2f}', f'{100*group.q_relative_l2.median():.2f}',
+             f'{100*group.q_relative_l2.mean():.2f}'] for method, label in METHODS.items()
+            for group in [frame[frame.method == method]]], [3.0, 3.5, 3.5, 3.7, 3.7])
     document.add_picture(str(figures/'synthetic_localization.png'), width=Cm(17.1))
     paragraph(document, '图1 各场景定位误差的经验分布。包括全部216例，失配条件单独显示；PSO使用案例内三种子中位数。', size=9)
     mismatch = frame[frame.cohort != 'nominal']
@@ -196,11 +246,54 @@ def build(synthetic, public, newman, figures, output, allow_numerical_warnings=F
     document.add_picture(str(figures/'synthetic_release_cost.png'), width=Cm(17.1))
     paragraph(document, '图2 全部案例的源强误差及相对IA的配对求解时间。时间比显示中位数与四分位区间，'
         'PSO时间为单次种子的中位数而非三次总和。', size=9)
+    if updated:
+        paragraph(document, '释放容量与求解策略消融', bold=True)
+        ablation = pd.read_csv(synthetic.parent.parent/'solver_upgrade_full_ia_v2/comparison.csv')
+        variants = [('旧IA Adam 固定五参数', ablation[ablation.method == 'ia_vpdi']),
+                    ('IA 约化TRF 固定五参数', ablation[ablation.method == 'ia_vpdi_reduced_trf']),
+                    ('IA 约化TRF 容量选择', frame[frame.method == 'ia_vpdi'])]
+        table(document, ['完整216例 IA版本', '定位误差 m', 'Q相对L2误差 %', '条件求解 s'], [
+            [label, interval(group.localization_error_m), interval(100*group.q_relative_l2),
+             interval(group.seconds)] for label, group in variants], [5.0, 4.2, 4.4, 3.8])
+        if 'q_basis_count' in frame:
+            counts = frame.loc[frame.method == 'ia_vpdi', 'q_basis_count'].value_counts()
+            paragraph(document, '新版IA选择常量、三帽、五帽释放模型分别为'+
+                '、'.join(str(int(counts.get(k, 0))) for k in (1, 3, 5))+'例。'
+                '上表复用既有完整结果，不新增优化；各版本预算及执行时段不同，耗时作为条件记录。', size=9)
+            selected = frame[(frame.method == 'ia_vpdi') & (frame.cohort == 'nominal')]
+            constant = selected[selected.release == 'constant']
+            nonconstant = selected[selected.release != 'constant']
+            counts_constant = constant.q_basis_count.value_counts()
+            paragraph(document, f'名义条件下，{len(constant)}例真实恒定释放分别有'+
+                '、'.join(str(int(counts_constant.get(k, 0))) for k in (1, 3, 5))+
+                '例选择常量、三帽、五帽模型；'+
+                f'{int((nonconstant.q_basis_count == 5).sum())}/{len(nonconstant)}例单峰或双峰释放保留五参数。'
+                '真实释放类型只用于事后解释，未输入容量选择规则。', size=9)
+        control = pd.read_csv(synthetic.parent/'capacity_control/comparison.csv')
+        table(document, ['同容量方法 n=24', '定位误差 m', 'Q相对L2误差 %', '条件求解 s'], [
+            [('IA 容量选择' if method == 'ia_vpdi_bic' else '联合NLS 容量选择'),
+             interval(group.localization_error_m), interval(100*group.q_relative_l2), interval(group.seconds)]
+            for method, group in control.groupby('method')], [5.0, 4.2, 4.4, 3.8])
+        paragraph(document, '该消融给两种求解器相同容量族、BIC、观测、边界、几何初值及评价上限；'
+            'NLS只在共同初值处估计Q，此后联合优化而不消元。固定五参数对照与容量选择对照分开解释，'
+            '不把模型复杂度选择带来的收益全部归因为变量投影。24例按冻结元数据顺序预定，每组几何6例；'
+            '前两组覆盖六种风场/释放组合，专门单峰和双峰场景各取六次重复，不按胜负挑选。', size=9)
+        paired_objectives = control.pivot(index='case_id', columns='method', values='observed_mse')
+        near = int(((paired_objectives.ia_vpdi_bic/paired_objectives.joint_nls_bic-1).abs() <= .01).sum())
+        ia_time = control.loc[control.method == 'ia_vpdi_bic', 'seconds'].median()
+        nls_time = control.loc[control.method == 'joint_nls_bic', 'seconds'].median()
+        paragraph(document, f'同容量对照中，{near}/{len(paired_objectives)}例目标差不超过1%；'
+            f'IA与NLS的条件求解时间中位数分别为{ia_time:.2f}s和{nls_time:.2f}s。'
+            '精度相近时，约化求解体现计算效率；容量适配的重建收益由上表的版本消融解释。', bold=True, size=9)
 
     heading(document, '4.3 定位可靠性与区域校准')
     paragraph(document, '目的：检验消除源强和扩散局部补偿后的区域是否能反映定位不确定性，而非只比较浓度拟合。'
         '在原两类站网96个名义案例上，比较固定Q与D、只消除Q、同时消除Q与D三种局部信息；'
         '继续采用48例校准及48例验证的既定案例划分，不从反演中删除站点或时段。')
+    if updated:
+        paragraph(document, '本节已按新版IA逐案例实际选中的释放容量和源点重算。局部区域及有限候选池分析均条件于所选容量，'
+            '不包含离散模型选择不确定性。不可定义椭圆的案例保留在分母中、不给予覆盖，校准时记为正无穷分数；'
+            '既定48/48划分属于回顾性校准，而非新增独立外部验证。', size=9)
     local = pd.read_csv(synthetic/'analysis/local_diagnostics.csv')
     local = local[(local.cohort == 'nominal') & local.network.isin(['ideal5', 'jjj6'])]
     table(document, ['局部信息', '包含真源 例数', '可定义椭圆 例数', '面积中位数 km2'], [
@@ -233,11 +326,17 @@ def build(synthetic, public, newman, figures, output, allow_numerical_warnings=F
     heading(document, '4.4 公开受控释放数据验证')
     paragraph(document, '目的：利用Chilbolton甲烷受控释放检验真实观测下的源点与排放反演。'
         '包含8个释放窗口、2个物理源位置及7条光路；两种记录源高0.3m和1.6m分别报告，不择优。'
-        'IA、NLS、PSO和Adam共用垂直扩散、地面反射、光路平均及ppm转换适配器，均采用常Q容量；'
+        '本轮IA、NLS和Adam共用垂直扩散、地面反射、光路平均及ppm转换适配器，均采用常Q容量；'
         '旧五基函数结果仅保留为容量不同的补充材料。')
-    paragraph(document, '本节预算：IA及联合Adam各起点500步，NLS各起点最多250次函数评估，'
+    if updated:
+        paragraph(document, '本节IA更新为约化TRF，每起点最多250次评价；已知恒定受控释放固定采用常Q，'
+            '不强行进行时变容量选择。原NLS和Adam完整结果只读复用；本节另与作者贝叶斯方法比较。'
+            '新版PSO已在216例合成实验中评价，为控制计算量，本轮不再重复公开PSO；旧版完整结果单独保留，'
+            '不混入新版方法排名。两种源高仍分别报告，未选择效果较好的设定。')
+    else:
+        paragraph(document, '本节预算：IA及联合Adam各起点500步，NLS各起点最多250次函数评估，'
         'PSO每种子32粒子32代，均使用相同两个共同粗初值。公开比较统一使用CUDA结果，'
-        '原CPU参考只用于数值一致性核查，不混合汇总运行时间。')
+            '原CPU参考只用于数值一致性核查，不混合汇总运行时间。')
     replay = pd.read_csv(public/'analysis/quadrature_replay.csv')
     paragraph(document, f'数值核查：对全部{len(replay)}项拟合输出，将时间及释放求积由16阶提高到32阶，'
         '在原拟合参数处回放而不再优化。相对预测差1%作为既有阈值，'
@@ -255,10 +354,11 @@ def build(synthetic, public, newman, figures, output, allow_numerical_warnings=F
         paragraph(document, f'共同正演比较 源高{height:g} m', bold=True)
         table(document, ['方法', '8窗口定位误差 m', '实测Q相对误差 %', '浓度RMSE ppm'], [
             [label, interval(group.localization_error_m), interval(100*group.q_relative_error),
-             interval(group.observed_rmse_ppm, 3)] for method, label in METHODS.items()
+             interval(group.observed_rmse_ppm, 3)] for method, label in public_methods.items()
             for group in [beam[(beam.height_m == height) & (beam.method == method)]]], [3.1, 5.0, 5.0, 4.3])
     document.add_picture(str(figures/'public_release_localization.png'), width=Cm(17.1))
-    paragraph(document, '图4 共同正演下逐事件定位误差。PSO浅色点为全部随机重复，主符号为种子中位数；'
+    paragraph(document, '图4 共同正演下逐事件定位误差。'+
+        ('' if updated else 'PSO浅色点为全部随机重复，主符号为种子中位数；')+
         '源高敏感性和同一物理源的多个窗口不计作独立源位置。', size=9)
     paragraph(document, 'Newman作者方法', bold=True)
     paragraph(document, '调用sourceinversion 0.1.5作者Gaussian plume、原后验和M-MALA-within-Gibbs，'
@@ -289,10 +389,23 @@ def build(synthetic, public, newman, figures, output, allow_numerical_warnings=F
     if output.exists():
         raise FileExistsError('Choose a new report output; do not overwrite the prior report')
     output.parent.mkdir(parents=True, exist_ok=True)
+    # Keep table labels and initial rows together without forcing long tables onto one page.
+    for item in document.paragraphs:
+        following = item._p.getnext()
+        if (following is not None and following.tag == qn('w:tbl')) or item._p.findall('.//' + qn('w:drawing')):
+            item.paragraph_format.keep_with_next = True
+    for grid in document.tables:
+        for row in grid.rows:
+            row._tr.get_or_add_trPr().append(OxmlElement('w:cantSplit'))
+        initial_rows = grid.rows if len(grid.rows) <= 9 else grid.rows[:2]
+        for row in initial_rows:
+            for cell in row.cells:
+                for item in cell.paragraphs:
+                    item.paragraph_format.keep_with_next = row is not initial_rows[-1]
     document.save(output)
     (output.with_suffix('.sources.json')).write_text(json.dumps(dict(
-        generated=date.today().isoformat(), experiments_reoptimized=False,
-        source_sha256={str(Path(path).relative_to(ROOT)): hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        generated=date.today().isoformat(), experiments_reoptimized=bool(updated),
+        source_sha256={str(Path(path).resolve().relative_to(ROOT.resolve())): hashlib.sha256(Path(path).read_bytes()).hexdigest()
                        for path in evidence['source_files']}), ensure_ascii=False, indent=2), encoding='utf-8')
     return output
 
