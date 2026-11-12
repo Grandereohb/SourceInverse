@@ -26,6 +26,7 @@ Thumbs.db
 # Generated run outputs
 result/
 outputs/
+output/
 diffusion.gif
 deployment_runs/
 deployment_artifacts/

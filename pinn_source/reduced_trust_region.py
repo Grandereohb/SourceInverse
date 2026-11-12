@@ -22,8 +22,9 @@ class ReducedResidual:
                 or not np.isfinite(self.weights).all() or np.any(self.weights < 0)
                 or not np.any(self.weights > 0)):
             raise ValueError('Finite observations and nonnegative nonzero weights required')
-        self.upper = float(q_upper_bound)
-        if np.isnan(self.upper) or self.upper <= 0 or not 0 < rcond < 1:
+        self.upper = np.asarray(q_upper_bound,dtype=float)
+        if (self.upper.ndim>1 or np.isnan(self.upper).any() or np.any(self.upper<=0)
+                or not 0 < rcond < 1):
             raise ValueError('Positive Q upper bound and valid SVD cutoff required')
         self.rcond = float(rcond)
         self.response_calls = self.derivative_calls = self.inner_solves = 0
@@ -51,9 +52,10 @@ class ReducedResidual:
         scale = np.linalg.norm(weighted, axis=0)
         scale[scale == 0] = 1.
         normalized = weighted/scale
+        upper=np.broadcast_to(self.upper,scale.shape)
         # Column equilibration changes only coordinates, including the Q bounds.
         solution = lsq_linear(normalized, self.weights*self.observed,
-                              bounds=(np.zeros(len(scale)), self.upper*scale),
+                              bounds=(np.zeros(len(scale)), upper*scale),
                               method='bvls', tol=1e-12, max_iter=500)
         self.inner_solves += 1
         if not solution.success:

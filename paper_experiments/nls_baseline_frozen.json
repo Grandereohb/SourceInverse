@@ -1,0 +1,13 @@
+{
+  "revision": "756337627e9561c75ec555f9961f0f6685837beb",
+  "policy": "Fixed pre-optimization NLS baseline; do not tune or replace with later matched controls",
+  "sha256_lf": {
+    "paper_experiments/paper_joint_baselines.py": "0f3d3f11ea0b0d46063e02dd0cc02737abf99fa2b72516277ad0cec6fbeaa182",
+    "paper_experiments/paper_beam_joint_baselines.py": "1456a804ce20300c50baf273003863b8b9c89dcf845a9efcf21d7f9e652570d1",
+    "paper_experiments/metec_point_adapter.py": "29bcc617d341389b256f33f974e741c273068b40a5c64175df616469e62af4d7",
+    "paper_experiments/paper_physical_beam_adapter.py": "7c37d1429d03ad6fc57ddac5f7295c0a269c58e11bd395b407feb262f590876a",
+    "paper_experiments/paper_fast_parcels.py": "a406eff7c234b8f2e552e7dd08e85a2176c1af83325141159102d09a9bc69ac1",
+    "paper_experiments/run_metec_comparison.py": "00029dc7dcbe0fa90de8466e1c4ba24c31b4710aeca50390c25bb36904c857c9",
+    "paper_experiments/run_paper_controlled_release.py": "24597d06ceb8bb516f7fe2dc624f75ae0cd48ab545be99fc1c6ca7f493bf5004"
+  }
+}

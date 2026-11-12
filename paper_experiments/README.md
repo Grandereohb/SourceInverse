@@ -1,5 +1,15 @@
 # 论文写作与实验专用脚本
 
+## 2026年11月研究代码快照
+
+- 已验收IA整理入口：`deliver_best_ia.py`；默认只核验并打包既有结果，不启动反演。
+- 完整实验数据与报告：`refresh_best_experiment_data.py`、`plot_best_experiment_report.py`、`build_best_experiment_report.py`。
+- 配对消融：`ia_paper_ablation_20261110.py`核验并复用归档结果，`ia_ablation_report_20261110.py`生成结果表和配对图。
+- `ia_*`及相应pilot/full/replay脚本保留研究过程与机制对照，不代表所有分支均推荐生产使用。二维空间风场的验收结果不推广为三维闭合、背景修正或相关扩散分支的性能结论。
+- NLS源码由`nls_baseline_frozen.json`和测试固定在`7563376`。历史空间风NLS仅作归档消融对照，不替换原冻结基线，不为制造差异重新调参。
+- 研究脚本可能依赖本地`result/`归档、公开样本或文档运行时；源码上传不等于随仓库提供原始数据或实验结果。输出保存在`result/`或`output/`，不提交生成文件。
+- 生产算法由`pinn_source/config.py`选择；仓库默认`joint_adam`，IA与BIC需显式开启。发布源码不自动启用论文的三风站适配器。
+
 此目录独立保存论文研究代码，不属于日常溯源和服务器部署入口。2026年10月21日从原scripts目录迁入42个专用脚本，相关21个测试文件迁入tests子目录。
 
 ## 目录职责

@@ -1,52 +1,122 @@
+"""溯源配置：公共设置与各算法参数分区；可选功能关闭不等于参数失效。"""
 import os
 from pathlib import Path
 
-
+# =========================
+# 公共：输入、算法与运行设备
+# =========================
+# PINN_INVERSION_MODE 环境变量可覆盖算法选择；保留当前本地选择。
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-# =========================
-# Data Paths
-# =========================
 SITE_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/sites.xlsx'
 CONC_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/concentration.xlsx'
 WIND_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/wind.xlsx'
-# =========================
-# Model / Device
-# =========================
+TARGET_POLLUTANT = '苯'
+INVERSION_MODE = "joint_adam"  # "joint_adam" or "ia_vpdi"
 DEVICE = "auto"  # "auto", "cpu", or "cuda"
 FIELD_MODE = "recurrent_pde"
 
-# Single algorithm selector; both modes use the shared models.pinn.PINN backend.
-# Set to "ia_vpdi" to switch both direct and batch runs to variable projection.
-# PINN_INVERSION_MODE overrides this value; joint_adam remains the default.
-INVERSION_MODE = "joint_adam"  # "joint_adam" or "ia_vpdi"
+# =========================
+# 公共：数据预处理
+# =========================
+# 同时影响两种算法的输入；IA使用全部有效观测，不使用下方Adam拟合权重。
+DATA_NORMALIZE = True
+TRAIN_ON_RESIDUAL = True
+BASELINE_MODE = "median"  # "median", "q25", or "q40"
+DATA_SCALE_PERCENTILE = 95.0
+ENABLE_EVENT_WINDOW_CROP = True
+EVENT_WINDOW_MIN_MAX = 1.0
+EVENT_WINDOW_MIN_RELIEF = 0.15
+EVENT_WINDOW_PAD_STEPS = 2
 
 # =========================
-# IA-VPDI (Experimental)
+# 公共：风场
 # =========================
-IA_VP_Q_BASIS_COUNT = 0  # 0 selects 3-5 basis functions from event length
-IA_VP_Q_BASIS_TYPE = "hat"
+WIND_DIR_IS_FROM = True
+ENABLE_WIND_VECTOR_SMOOTHING = True
+WIND_SMOOTH_WINDOW = 5
+WIND_SMOOTH_LOW_SPEED_MPS = 0.8
+WIND_SCALE = 0.25
+
+# =========================
+# 公共：搜索域、源项与扩散
+# =========================
+# 扩散系数单位m^2/s。IA始终使用各向异性扩散；ENABLE开关控制joint_adam。
+DOMAIN_PAD_M = 500.0
+SOURCE_POSITION_PAD_M = 500.0
+SOURCE_INIT_MODE = "max_station_upwind"  # "center" or "max_station_upwind"
+SOURCE_INIT_UPWIND_DISTANCE_M = 1000.0
+SOURCE_INIT_PEAK_VALUE = (
+    "raw"  # "raw" uses observed high-value peak, "fit" uses residual peak
+)
+SIGMA_SRC = 0.05
+SIGMA_SRC_M = None  # optional Gaussian standard deviation in meters
+D_MIN_PHYS = 1.0  # m^2/s
+ENABLE_ANISOTROPIC_DIFFUSION = False
+D_PARALLEL_MIN = 1.0  # m^2/s
+D_PERP_MIN = 1.0  # m^2/s
+
+# =========================
+# 公共：输运求解器与离散精度
+# =========================
+# grid与gaussian_parcels使用不同离散参数；未启用的备选求解器仍有代码支持。
+RECURRENT_TRANSPORT_SOLVER = "grid"  # opt-in full-space "gaussian_parcels"
+RECURRENT_SOURCE_MODE = "gaussian"  # legacy; opt-in "cell_gaussian" or "point"
+RECURRENT_DIFFUSION_SOLVER = (
+    "gaussian"  # opt-in "tensor_semigroup"; "implicit" is scalar only
+)
+RECURRENT_PARCEL_SUBDIVISIONS = 64  # release quadrature, independent of spatial grid
+RECURRENT_GRID_NX = 36
+RECURRENT_GRID_NY = 36
+RECURRENT_SUBSTEPS = 1  # minimum when adaptive stepping is enabled
+RECURRENT_ADAPTIVE_SUBSTEPS = True
+RECURRENT_MAX_ADVECTION_CELLS = 6.0
+RECURRENT_MAX_SUBSTEPS = 3
+RECURRENT_SOURCE_SCALE = 1.0
+RECURRENT_DECAY = 0.50  # 1/hour
+RECURRENT_INITIAL_RELEASE_FRACTION = 1.0
+RECURRENT_SOURCE_DECAY_INTEGRATOR = "legacy"  # opt-in: "exponential_linear"
+
+# =========================
+# IA-VPDI：源强表达与BIC选择
+# =========================
+# fixed使用固定容量；bic比较候选容量并重估位置、扩散与源强。
 IA_VP_Q_CAPACITY_SELECTION = "fixed"  # opt-in "bic": choose constant/3/5 hats using all data
 IA_VP_Q_CAPACITY_COUNTS = (1, 3, 5)
-IA_VP_RESPONSE_BATCH_SIZE = 8  # 1 retains the serial reference; no Q/search change
-IA_VP_JACOBIAN_BATCH_SIZE = 16  # diagnostic VJP rows; 1 retains serial gradients
-IA_VP_TIMING_ENABLED = True
-IA_VP_Q_LAYOUT_STRATEGY = "uniform"  # opt-in: local_templates (clock-only hat layouts)
+IA_VP_Q_BASIS_COUNT = 0  # 0 selects 3-5 basis functions from event length
+IA_VP_Q_BASIS_TYPE = "hat"
 IA_VP_Q_UPPER_BOUND = float("inf")  # opt-in model-unit amplitude bound
+IA_VP_Q_LAYOUT_STRATEGY = "uniform"  # opt-in: local_templates (clock-only hat layouts)
 IA_VP_Q_KNOTS = None  # optional normalized times; fixed during refinement
+
+# =========================
+# IA-VPDI：搜索与TRF求解
+# =========================
 IA_VP_SEARCH_STEP_M = 500.0
 IA_VP_TOP_K = 3
 IA_VP_START_STRATEGY = "score"  # opt-in "spatial_diverse"; baseline unchanged
 IA_VP_START_MIN_DISTANCE_M = 1000.0  # relaxed if too few distinct neighborhoods
 IA_VP_DIFFUSION_SCALE_SEEDS = (0.5, 1.0, 2.0)
 IA_VP_DIFFUSION_RATIO_SEEDS = (1.0, 3.0)
-IA_VP_OUTER_STEPS = 200  # TRF maximum function evaluations per start, or legacy Adam steps
 IA_VP_OUTER_SOLVER = "trf"  # scaled reduced trust region; "adam" retains legacy refinement
+IA_VP_OUTER_STEPS = 200  # TRF maximum function evaluations per start, or legacy Adam steps
+IA_VP_ACTIVE_Q_TOL = 1.0e-8
+IA_VP_RESPONSE_BATCH_SIZE = 8  # 1 retains the serial reference; no Q/search change
+IA_VP_JACOBIAN_BATCH_SIZE = 16  # diagnostic VJP rows; 1 retains serial gradients
+IA_VP_TIMING_ENABLED = True
+
+# =========================
+# IA-VPDI：可选Adam外层
+# =========================
+# 仅IA_VP_OUTER_SOLVER=adam使用；不是joint_adam训练参数。
 IA_VP_OUTER_LR = 1.0e-2  # Adam only
 IA_VP_OUTER_PATIENCE = 30  # Adam only
 IA_VP_OUTER_MIN_DELTA = 1.0e-8
 IA_VP_MAX_GRAD_NORM = 10.0
-IA_VP_ACTIVE_Q_TOL = 1.0e-8
+
+# =========================
+# IA-VPDI：定位诊断及可选布站建议
+# =========================
+# 仅解释结果，不改变观测筛选或反演目标。
 IA_VP_INFORMATION_RCOND = 1.0e-10
 IA_VP_INFORMATION_CONDITION_MAX = 1.0e8
 IA_VP_LOCALIZATION_RADIUS_LIMIT_M = (
@@ -63,83 +133,23 @@ IA_VP_SENSOR_GRID_STEP_M = 500.0
 IA_VP_SENSOR_TOP_K = 5
 IA_VP_SENSOR_MIN_DISTANCE_M = 250.0
 
-# Optional wind-aligned diffusion tensor. Disabled by default so the current
-# isotropic solver remains unchanged.
-ENABLE_ANISOTROPIC_DIFFUSION = False
-D_PARALLEL_MIN = 1.0  # m^2/s
-D_PERP_MIN = 1.0  # m^2/s
-
 # =========================
-# Output
+# joint_adam：训练与早停
 # =========================
-OUTPUT_DIR = os.environ.get(
-    "PINN_OUTPUT_DIR",
-    str(PROJECT_ROOT / "result"),
-)
-TARGET_POLLUTANT = '苯'
-MAKE_PLOTS = True
-
-# =========================
-# Wind
-# =========================
-WIND_DIR_IS_FROM = True
-ENABLE_WIND_VECTOR_SMOOTHING = True
-WIND_SMOOTH_WINDOW = 5
-WIND_SMOOTH_LOW_SPEED_MPS = 0.8
-# Fraction of the measured hourly mean wind used by the effective transport model.
-WIND_SCALE = 0.25
-
-# =========================
-# Training
-# =========================
+# 这些训练轮数、学习率和早停项不控制IA的TRF。
 EPOCHS = 2500
 LR = 1e-3
 LOSS_W_DATA = 1.0
 MAX_GRAD_NORM = 10.0
 DEBUG_EVERY = 1000
-
 EARLY_STOP_START = 700
 EARLY_STOP_PATIENCE = 200
 EARLY_STOP_MIN_DELTA = 1.0
 
 # =========================
-# Domain / Source
+# joint_adam：时变源强与正则化
 # =========================
-DOMAIN_PAD_M = 500.0
-# Positive values allow source candidates outside the station envelope.
-SOURCE_POSITION_PAD_M = 500.0
-SOURCE_INIT_MODE = "max_station_upwind"  # "center" or "max_station_upwind"
-SOURCE_INIT_UPWIND_DISTANCE_M = 1000.0
-SOURCE_INIT_PEAK_VALUE = (
-    "raw"  # "raw" uses observed high-value peak, "fit" uses residual peak
-)
-SIGMA_SRC = 0.05
-SIGMA_SRC_M = None  # optional Gaussian standard deviation in meters
-RECURRENT_SOURCE_MODE = "gaussian"  # legacy; opt-in "cell_gaussian" or "point"
-RECURRENT_DIFFUSION_SOLVER = (
-    "gaussian"  # opt-in "tensor_semigroup"; "implicit" is scalar only
-)
-RECURRENT_TRANSPORT_SOLVER = "grid"  # opt-in full-space "gaussian_parcels"
-RECURRENT_PARCEL_SUBDIVISIONS = 64  # release quadrature, independent of spatial grid
-D_MIN_PHYS = 1.0  # m^2/s
-
-# =========================
-# Recurrent PDE Plume
-# =========================
-RECURRENT_GRID_NX = 36
-RECURRENT_GRID_NY = 36
-RECURRENT_SUBSTEPS = 1  # minimum when adaptive stepping is enabled
-RECURRENT_ADAPTIVE_SUBSTEPS = True
-RECURRENT_MAX_ADVECTION_CELLS = 6.0
-RECURRENT_MAX_SUBSTEPS = 3
-RECURRENT_SOURCE_SCALE = 1.0
-RECURRENT_DECAY = 0.50  # 1/hour
-RECURRENT_INITIAL_RELEASE_FRACTION = 1.0
-RECURRENT_SOURCE_DECAY_INTEGRATOR = "legacy"  # opt-in: "exponential_linear"
-
-# =========================
-# Source Strength Q(t)
-# =========================
+# IA改用上方IA_VP_Q_*；共享模型初始化仍保留这些接口。
 Q_MODE = "smooth_time"  # "neural", "smooth_time", or "piecewise"
 Q_SEGMENT_LENGTH = 6
 Q_SMOOTH_WEIGHT = 0.0
@@ -147,65 +157,52 @@ Q_L2_WEIGHT = 0.0001
 Q_MIN = 0.05
 Q_MAX = 100.0
 
-# These remain for PINN model compatibility. They are frozen in recurrent_pde mode.
-PLUME_MAX = None
-PLUME_RAW_SHIFT = 4.0
-
 # =========================
-# Data Fitting / Event Window
+# joint_adam：观测权重与拟合损失
 # =========================
-DATA_NORMALIZE = True
-TRAIN_ON_RESIDUAL = True
-BASELINE_MODE = "median"  # "median", "q25", or "q40"
-
-ENABLE_EVENT_WINDOW_CROP = True
-EVENT_WINDOW_MIN_MAX = 1.0
-EVENT_WINDOW_MIN_RELIEF = 0.15
-EVENT_WINDOW_PAD_STEPS = 2
-
-DATA_SCALE_PERCENTILE = 95.0
+# 不用于IA全观测等权平方残差；权重为0表示关闭，不代表参数废弃。
 DATA_HIGH_WEIGHT = 2.0
 DATA_HIGH_PERCENTILE = 95.0
 DATA_HIGH_POWER = 1.0
-
 DATA_TIME_PEAK_WEIGHT = 4.0
 DATA_TIME_PEAK_RATIO = 0.6
 DATA_TIME_PEAK_POWER = 1.0
 DATA_TIME_PEAK_MIN_RELIEF = 0.15
-
 EVENT_TIME_WEIGHT = 3.0
 EVENT_PEAK_WEIGHT = 3.0
 EVENT_PEAK_RATIO = 0.6
-
-# Residual Focal Loss is kept for optional rollback, but raw worst-residual loss
-# is now the primary way to prevent severe misses from being averaged away.
 RESIDUAL_FOCAL_WEIGHT = 0.0
 RESIDUAL_FOCAL_POWER = 1.0
 RESIDUAL_FOCAL_SCALE = 1.0
 RESIDUAL_FOCAL_MAX_WEIGHT = 20.0
-
 RAW_RESIDUAL_BASE_WEIGHT = 1.0
 RAW_RESIDUAL_WORST_WEIGHT = 0.5
 
-# Debug-only multi-station peak counters.
-MULTI_HIGH_RATIO = 0.5
-MULTI_HIGH_MIN_RELIEF = 0.15
+# =========================
+# 共享模型兼容参数
+# =========================
+# models.pinn仍引用；recurrent_pde模式冻结对应网络，不可直接删除。
+PLUME_MAX = None
+PLUME_RAW_SHIFT = 4.0
 
 # =========================
-# Diagnostics / Ablation
+# 公共：结果诊断与可选局部站点测试
 # =========================
+# 站点测试属于显式可选诊断，不是IA交叉拟合或源选择步骤。
+MULTI_HIGH_RATIO = 0.5
+MULTI_HIGH_MIN_RELIEF = 0.15
 SINGLE_STATION_DOMINANCE_RATIO = 0.8
 SINGLE_STATION_PEAK_MISS_RATIO = 0.2
 SINGLE_STATION_PEAK_TIME_TOL_H = 6.0
-
 ENABLE_STATION_ABLATION = False
 ABLATION_TARGET_STATION = "上石化边界卫三路站"
 ABLATION_NEIGHBOR_RADIUS_M = 2500.0
 ABLATION_MAX_NEIGHBORS = 4
 
 # =========================
-# Source Confidence / Plots
+# joint_adam：固定源强位置扫描图
 # =========================
+# 固定其他参数的位置扫描，不是真正的profile置信区间；IA使用自身诊断。
 USE_SOURCE_LANDSCAPE_CONFIDENCE = True
 SOURCE_LANDSCAPE_MODE = "local"  # "local" or "source_domain"
 SOURCE_LANDSCAPE_RADIUS_M = 450.0
@@ -213,6 +210,14 @@ SOURCE_LANDSCAPE_STEP_M = 150.0
 SOURCE_LANDSCAPE_TEMPERATURE = 0.1
 SOURCE_LANDSCAPE_LEVELS = [0.5, 0.8, 0.95]
 
+# =========================
+# 公共：文件输出与可视化
+# =========================
+OUTPUT_DIR = os.environ.get(
+    "PINN_OUTPUT_DIR",
+    str(PROJECT_ROOT / "result"),
+)
+MAKE_PLOTS = True
 DIFFUSION_N_FRAMES = 24
 DIFFUSION_NX = 140
 DIFFUSION_NY = 140
