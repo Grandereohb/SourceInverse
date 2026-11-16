@@ -309,6 +309,16 @@ def load_sites_table(
 
     raw = pd.read_excel(path, header=None)
     coords: dict[str, tuple[float, float]] = {}
+    # Standard model tables: station/lon/lat columns, or lon/lat rows.
+    headers = [str(v).strip().lower() for v in raw.iloc[0]] if len(raw) else []
+    if 'station' in headers and (
+        {'lon', 'lat'}.issubset(headers)
+        or {'lon', 'lat'}.issubset(set(raw.iloc[1:, headers.index('station')].astype(str).str.lower()))
+    ):
+        from data_io import load_sites
+        standard, _, _ = load_sites(path)
+        coords = {str(row.station).strip(): (float(row.lon), float(row.lat))
+                  for row in standard.itertuples()}
     for _, row in raw.iterrows():
         station = row.iloc[1] if len(row) > 1 else None
         coord_text = row.iloc[3] if len(row) > 3 else None
@@ -322,7 +332,7 @@ def load_sites_table(
         lat = extract_numeric(lat_text)
         if lon is None or lat is None:
             continue
-        coords[str(station).strip()] = (lon, lat)
+        coords.setdefault(str(station).strip(), (lon, lat))
 
     if not coords:
         raise ValueError(f"No station coordinates parsed from: {path}")
@@ -331,6 +341,12 @@ def load_sites_table(
         ordered_names = list(coords)
     else:
         ordered_names = [name for name in station_order if name in coords]
+        if not ordered_names:
+            raise ValueError(
+                f'No matching station coordinates in {path}. '
+                f'Concentration stations: {station_order}; coordinate stations: {list(coords)}. '
+                'Set SITES_FILE_PATH to the coordinate workbook for this monitoring network.'
+            )
 
     site_df = pd.DataFrame({"station": ["lon", "lat"]})
     for name in ordered_names:
