@@ -1,4 +1,5 @@
 """溯源配置：公共设置与各算法参数分区；可选功能关闭不等于参数失效。"""
+
 import os
 from pathlib import Path
 
@@ -7,11 +8,13 @@ from pathlib import Path
 # =========================
 # PINN_INVERSION_MODE 环境变量可覆盖算法选择；保留当前本地选择。
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SITE_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/sites.xlsx'
-CONC_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/concentration.xlsx'
-WIND_PATH = 'C:/Document/phd/SourceInverse/SourceInverse/data/jjj/wind.xlsx'
-TARGET_POLLUTANT = '苯'
-INVERSION_MODE = "joint_adam"  # "joint_adam" or "ia_vpdi"
+SITE_PATH = "C:/Document/phd/SourceInverse/SourceInverse/data/zhenhua1112/sites.xlsx"
+CONC_PATH = (
+    "C:/Document/phd/SourceInverse/SourceInverse/data/zhenhua1112/concentration.xlsx"
+)
+WIND_PATH = "C:/Document/phd/SourceInverse/SourceInverse/data/zhenhua1112/wind.xlsx"
+TARGET_POLLUTANT = "间-二甲苯+对-二甲苯"
+INVERSION_MODE = "ia_vpdi"  # "joint_adam" or "ia_vpdi"
 DEVICE = "auto"  # "auto", "cpu", or "cuda"
 FIELD_MODE = "recurrent_pde"
 
@@ -80,7 +83,9 @@ RECURRENT_SOURCE_DECAY_INTEGRATOR = "legacy"  # opt-in: "exponential_linear"
 # IA-VPDI：源强表达与BIC选择
 # =========================
 # fixed使用固定容量；bic比较候选容量并重估位置、扩散与源强。
-IA_VP_Q_CAPACITY_SELECTION = "fixed"  # opt-in "bic": choose constant/3/5 hats using all data
+IA_VP_Q_CAPACITY_SELECTION = (
+    "fixed"  # opt-in "bic": choose constant/3/5 hats using all data
+)
 IA_VP_Q_CAPACITY_COUNTS = (1, 3, 5)
 IA_VP_Q_BASIS_COUNT = 0  # 0 selects 3-5 basis functions from event length
 IA_VP_Q_BASIS_TYPE = "hat"
@@ -97,8 +102,12 @@ IA_VP_START_STRATEGY = "score"  # opt-in "spatial_diverse"; baseline unchanged
 IA_VP_START_MIN_DISTANCE_M = 1000.0  # relaxed if too few distinct neighborhoods
 IA_VP_DIFFUSION_SCALE_SEEDS = (0.5, 1.0, 2.0)
 IA_VP_DIFFUSION_RATIO_SEEDS = (1.0, 3.0)
-IA_VP_OUTER_SOLVER = "trf"  # scaled reduced trust region; "adam" retains legacy refinement
-IA_VP_OUTER_STEPS = 200  # TRF maximum function evaluations per start, or legacy Adam steps
+IA_VP_OUTER_SOLVER = (
+    "trf"  # scaled reduced trust region; "adam" retains legacy refinement
+)
+IA_VP_OUTER_STEPS = (
+    200  # TRF maximum function evaluations per start, or legacy Adam steps
+)
 IA_VP_ACTIVE_Q_TOL = 1.0e-8
 IA_VP_RESPONSE_BATCH_SIZE = 8  # 1 retains the serial reference; no Q/search change
 IA_VP_JACOBIAN_BATCH_SIZE = 16  # diagnostic VJP rows; 1 retains serial gradients

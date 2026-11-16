@@ -18,20 +18,20 @@ DEFAULT_WIND_NAME = "wind.xlsx"
 # Manual Inputs
 # =========================
 # INPUT_FILE_PATH: source workbook path. Relative paths are resolved from the repo root.
-INPUT_FILE_PATH = 'data/shsh_js/自动审核小时数据_标准单位_2026-07-01 00_00_00_2026-08-01 12_00_00.xlsx'
+INPUT_FILE_PATH = "data/zhenhua1112/11.12空气站数据.xlsx"
 # START_TIME / END_TIME: inclusive extraction time range.
-START_TIME = '2026-07-09 02:00:00'
-END_TIME = '2026-07-09 14:00:00'
+START_TIME = "2026-11-12 00:00:00"
+END_TIME = "2026-11-12 11:00:00"
 # TARGET_POLLUTANT: pollutant column name to extract.
-TARGET_POLLUTANT = '乙烯'
+TARGET_POLLUTANT = "间-二甲苯+对-二甲苯"
 # WIND_STATION_NAME: use this station sheet's wind direction/speed to build wind.xlsx.
 # Leave empty to keep the old behavior: average wind from all station sheets.
-WIND_STATION_NAME = '上石化园区卫四路站'
+WIND_STATION_NAME = "振华1号钢板库站"
 # OUTPUT_FOLDER:
 # - empty string: save directly into data/
 # - relative path: save into data/<OUTPUT_FOLDER>/
 # - absolute path: save into that absolute directory
-OUTPUT_FOLDER = 'shsh_js'
+OUTPUT_FOLDER = "zhenhua1112"
 SHEET_SUFFIX_PATTERNS = [
     r"\(带标识\)$",
     r"（带标识）$",
@@ -269,7 +269,8 @@ def build_wind_table(
         if wind_station_name is not None and str(wind_station_name).strip():
             if not matched_station:
                 available = ", ".join(
-                    station_name for station_name, _ in unique_station_sheets(workbook.sheet_names)
+                    station_name
+                    for station_name, _ in unique_station_sheets(workbook.sheet_names)
                 )
                 raise ValueError(
                     "Failed to build wind table: wind station "

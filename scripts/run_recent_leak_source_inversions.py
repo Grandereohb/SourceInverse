@@ -44,7 +44,7 @@ EXTRACT_OUTPUT_FOLDER = ""
 # Manual Inputs
 # =========================
 # SOURCE_INVERSION_COUNT: number of leak events to run in sequence.
-SOURCE_INVERSION_COUNT = 30
+SOURCE_INVERSION_COUNT = 18
 
 # TRAVERSE_DIRECTION:
 # - "backward": traverse leak events from later time to earlier time.
